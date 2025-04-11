@@ -65,5 +65,48 @@ def get_vehicle(current_user, vehicle_id):
     }
 
     return jsonify(vehicle_data), 200
+# Adicionar ao arquivo routes/vehicle_routes.py
 
+@vehicle_bp.route('/', methods=['POST'])
+@token_required
+def add_vehicle(current_user):
+    data = request.get_json()
+    
+    # Verifica se os campos obrigatórios estão presentes
+    required_fields = ['type', 'brand', 'model', 'year', 'license_plate']
+    for field in required_fields:
+        if field not in data:
+            return jsonify({'message': f'Campo {field} é obrigatório'}), 400
+    
+    # Verifica se o tipo de veículo é válido
+    valid_types = ['carro', 'moto', 'caminhao']
+    if data['type'] not in valid_types:
+        return jsonify({'message': 'Tipo de veículo inválido'}), 400
+    
+    # Cria o novo veículo
+    new_vehicle = Vehicle(
+        user_id=current_user.id,
+        type=data['type'],
+        brand=data['brand'],
+        model=data['model'],
+        year=data['year'],
+        license_plate=data['license_plate'],
+        color=data.get('color')
+    )
+    
+    db.session.add(new_vehicle)
+    db.session.commit()
+    
+    return jsonify({
+        'message': 'Veículo adicionado com sucesso',
+        'vehicle': {
+            'id': new_vehicle.id,
+            'type': new_vehicle.type,
+            'brand': new_vehicle.brand,
+            'model': new_vehicle.model,
+            'year': new_vehicle.year,
+            'license_plate': new_vehicle.license_plate,
+            'color': new_vehicle.color
+        }
+    }), 201
 # Endpoint para adicionar veículo e outras operações serão implementados em uma versão futura

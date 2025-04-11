@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:garagem/screens/register_screen.dart';
 import 'package:garagem/theme/theme_screen.dart';
 import 'package:garagem/services/auth_service.dart';
+import 'package:garagem/screens/home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -25,50 +26,42 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  Future<void> _login() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
-    
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    try {
-      final result = await AuthService().login(
-        _emailController.text.trim(),
-        _passwordController.text,
-      );
-
-      if (result['success']) {
-        // Navegar para a tela principal após login bem-sucedido
-        // Navigator.of(context).pushReplacement(
-        //   MaterialPageRoute(builder: (context) => HomeScreen()),
-        // );
-        
-        // Por enquanto, apenas mostrar um SnackBar de sucesso
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Login realizado com sucesso!'),
-            backgroundColor: AppTheme.successColor,
-          ),
-        );
-      } else {
-        setState(() {
-          _errorMessage = result['message'] ?? 'Erro ao fazer login';
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _errorMessage = 'Erro de conexão. Tente novamente mais tarde.';
-      });
-    } finally {
-      setState(() {
-        _isLoading = false;
-      });
-    }
+Future<void> _login() async {
+  if (!_formKey.currentState!.validate()) {
+    return;
   }
+  
+  setState(() {
+    _isLoading = true;
+    _errorMessage = null;
+  });
+
+  try {
+    final result = await AuthService().login(
+      _emailController.text.trim(),
+      _passwordController.text,
+    );
+
+    if (result['success']) {
+      // Navegar para a tela principal após login bem-sucedido
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (context) => const HomeScreen()),
+      );
+    } else {
+      setState(() {
+        _errorMessage = result['message'] ?? 'Erro ao fazer login';
+      });
+    }
+  } catch (e) {
+    setState(() {
+      _errorMessage = 'Erro de conexão. Tente novamente mais tarde.';
+    });
+  } finally {
+    setState(() {
+      _isLoading = false;
+    });
+  }
+}
 
   @override
   Widget build(BuildContext context) {

@@ -61,11 +61,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         _nameController.text.trim(),
         _emailController.text.trim(),
         _passwordController.text,
-      
-      
-      // Estes campos não estão sendo enviados para o backend conforme implementação atual
-      // Você pode revisitar isso mais tarde se precisar enviar estes dados adicionais
-      cpfFormatter.getUnmaskedText(),
+        cpfFormatter.getUnmaskedText(),
       phoneFormatter.getUnmaskedText(),
       _confirmPasswordController.text,
       );

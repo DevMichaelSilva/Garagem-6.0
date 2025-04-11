@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:garagem/screens/login_screen.dart';
 import 'package:garagem/theme/theme_screen.dart';
+import 'package:garagem/screens/home_screen.dart';
+import 'package:garagem/services/auth_service.dart';
+
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({Key? key}) : super(key: key);
@@ -42,11 +45,17 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   }
 
   _navigateToLogin() async {
-    await Future.delayed(const Duration(seconds: 3));
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (context) => const LoginScreen()),
-    );
-  }
+  await Future.delayed(const Duration(seconds: 3));
+  
+  // Verifica se o usuário está logado
+  bool isLoggedIn = await AuthService().isLoggedIn();
+  
+  Navigator.of(context).pushReplacement(
+    MaterialPageRoute(
+      builder: (context) => isLoggedIn ? const HomeScreen() : const LoginScreen(),
+    ),
+  );
+}
 
   @override
   void dispose() {
