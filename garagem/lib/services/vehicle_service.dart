@@ -118,6 +118,43 @@ class VehicleService {
       };
     }
   }
+  
+  Future<bool> deleteVehicle(int vehicleId) async {
+  try {
+    final token = await AuthService().getToken();
+    
+    if (token == null) {
+      throw Exception('Usuário não autenticado');
+    }
+
+    final response = await http.delete(
+      Uri.parse('$baseUrl/vehicles/$vehicleId'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+    );
+
+    print('Status code: ${response.statusCode}');
+    print('Response body: ${response.body}');
+
+    if (response.statusCode == 200) {
+      // Se a resposta for 200, é sucesso mesmo que o corpo não seja o esperado
+      return true;
+    } else {
+      // Tentamos extrair a mensagem de erro, mas com tratamento de exceção
+      try {
+        final data = jsonDecode(response.body);
+        throw Exception(data['message'] ?? 'Erro ao excluir veículo');
+      } catch (e) {
+        throw Exception('Erro ao excluir veículo. Status code: ${response.statusCode}');
+      }
+    }
+  } catch (e) {
+    print('Erro em deleteVehicle: $e');
+    throw Exception('Erro ao excluir veículo: ${e.toString()}');
+  }
+}
 
   Future<Map<String, dynamic>> addVehicle(Vehicle vehicle) async {
     try {

@@ -4,7 +4,7 @@ import 'package:garagem/services/auth_service.dart';
 import 'package:garagem/theme/theme_screen.dart';
 import 'package:garagem/screens/add_vehicle_screen.dart';
 import 'package:garagem/screens/login_screen.dart';
-import 'package:garagem/screens/vehicle_detail_screen.dart'; // Adicionando a importação da VehicleDetailScreen
+import 'package:garagem/screens/vehicle_detail_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -29,7 +29,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadUserInfo() async {
     final userInfo = await AuthService().getCurrentUser();
-    if (userInfo.isNotEmpty) {
+    if (userInfo.isNotEmpty && mounted) {
       setState(() {
         _userName = userInfo['name'] ?? '';
       });
@@ -37,29 +37,103 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _fetchVehicles() async {
+    if (!mounted) return;
+    
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
 
-    final result = await _vehicleService.getVehicles();
-
-    setState(() {
-      _isLoading = false;
-      if (result['success']) {
-        _vehicles = result['vehicles'];
-      } else {
-        _errorMessage = result['message'];
+    try {
+      final result = await _vehicleService.getVehicles();
+      if (mounted) {
+        setState(() {
+          if (result['success']) {
+            _vehicles = result['vehicles'] as List<Vehicle>;
+          } else {
+            _errorMessage = result['message'] as String;
+          }
+          _isLoading = false;
+        });
       }
-    });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = e.toString();
+          _isLoading = false;
+        });
+      }
+    }
   }
 
   Future<void> _logout() async {
     await AuthService().logout();
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (context) => const LoginScreen()),
-    );
+    if (mounted) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (context) => const LoginScreen()),
+      );
+    }
   }
+  
+  Future<void> _deleteVehicle(Vehicle vehicle) async {
+  try {
+    if (vehicle.id == null) {
+      throw Exception('ID do veículo não encontrado');
+    }
+    
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirmar Exclusão'),
+        content: Text('Deseja realmente excluir o veículo "${vehicle.brand} ${vehicle.model}"?\n\nEsta ação apagará também todo o histórico de serviços associado a este veículo.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('CANCELAR'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('EXCLUIR', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    ) ?? false;
+    
+    if (confirmed && mounted) {
+      // Mostrar indicador de progresso
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Excluindo veículo...'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      
+      // Chamar a API para excluir
+      final success = await _vehicleService.deleteVehicle(vehicle.id!);
+      
+      if (mounted && success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Veículo ${vehicle.brand} ${vehicle.model} excluído com sucesso!'),
+            backgroundColor: AppTheme.successColor,
+          ),
+        );
+        
+        // Recarregar a lista de veículos
+        _fetchVehicles();
+      }
+    }
+  } catch (e) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erro ao excluir veículo: ${e.toString()}'),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+    }
+  }
+}
 
   @override
   Widget build(BuildContext context) {
@@ -75,6 +149,7 @@ class _HomeScreenState extends State<HomeScreen> {
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: _logout,
+            tooltip: 'Sair',
           ),
         ],
       ),
@@ -220,14 +295,17 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: () {
-          // Navegar para a tela de detalhes do veículo
-          Navigator.push(
+        onTap: () async {
+          final result = await Navigator.push(
             context,
             MaterialPageRoute(
               builder: (context) => VehicleDetailScreen(vehicle: vehicle),
             ),
           );
+          
+          if (result == true) {
+            _fetchVehicles();
+          }
         },
         child: Padding(
           padding: const EdgeInsets.all(16),
@@ -313,6 +391,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ],
                 ),
+              ),
+              // Aqui adicionamos o botão de exclusão
+              IconButton(
+                icon: const Icon(Icons.delete_outline, color: Colors.red),
+                tooltip: 'Excluir Veículo',
+                onPressed: () => _deleteVehicle(vehicle),
               ),
               Icon(
                 Icons.chevron_right,

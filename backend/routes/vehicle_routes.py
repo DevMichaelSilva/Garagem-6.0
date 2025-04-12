@@ -1,8 +1,14 @@
 from flask import Blueprint, request, jsonify, current_app
 from extensions import db
-from models import Vehicle, User
+from models import Vehicle, User, Maintenance, MaintenanceImage
 import jwt
 from functools import wraps
+from datetime import datetime
+import logging
+
+# Configurar logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 vehicle_bp = Blueprint('vehicle', __name__)
 
@@ -20,8 +26,9 @@ def token_required(f):
             current_user = User.query.get(data['user_id'])
             if not current_user:
                 return jsonify({'message': 'Usuário não encontrado'}), 401
-        except:
-            return jsonify({'message': 'Token inválido'}), 401
+        except Exception as e:
+            logger.error(f"Erro na autenticação: {str(e)}")
+            return jsonify({'message': f'Token inválido: {str(e)}'}), 401
             
         return f(current_user, *args, **kwargs)
     
@@ -109,4 +116,39 @@ def add_vehicle(current_user):
             'color': new_vehicle.color
         }
     }), 201
+
+@vehicle_bp.route('/<int:vehicle_id>', methods=['DELETE'])
+@token_required
+def delete_vehicle(current_user, vehicle_id):
+    """
+    Exclui um veículo específico.
+    Verifica se o veículo pertence ao usuário atual.
+    """
+    try:
+        # Buscar o veículo
+        vehicle = Vehicle.query.get(vehicle_id)
+        if not vehicle:
+            return jsonify({'message': 'Veículo não encontrado'}), 404
+        
+        # Verificar se o veículo pertence ao usuário
+        if vehicle.user_id != current_user.id:
+            return jsonify({'message': 'Este veículo não pertence ao usuário atual'}), 403
+        
+        # Excluir todas as manutenções relacionadas (as imagens são excluídas em cascata)
+        maintenances = Maintenance.query.filter_by(vehicle_id=vehicle_id).all()
+        for maintenance in maintenances:
+            db.session.delete(maintenance)
+        
+        # Excluir o veículo
+        db.session.delete(vehicle)
+        db.session.commit()
+        
+        logger.info(f"Veículo ID {vehicle_id} excluído com sucesso pelo usuário ID {current_user.id}")
+        return jsonify({'message': 'Veículo excluído com sucesso'}), 200
+    
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Erro ao excluir veículo: {str(e)}")
+        return jsonify({'message': f'Erro ao excluir veículo: {str(e)}'}), 500
+
 # Endpoint para adicionar veículo e outras operações serão implementados em uma versão futura
