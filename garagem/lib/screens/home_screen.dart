@@ -4,6 +4,7 @@ import 'package:garagem/services/auth_service.dart';
 import 'package:garagem/theme/theme_screen.dart';
 import 'package:garagem/screens/add_vehicle_screen.dart';
 import 'package:garagem/screens/login_screen.dart';
+import 'package:garagem/screens/vehicle_detail_screen.dart'; // Adicionando a importação da VehicleDetailScreen
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -220,13 +221,13 @@ class _HomeScreenState extends State<HomeScreen> {
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: () {
-          // Navegar para a tela de detalhes do veículo (a ser implementada)
-          // Navigator.push(
-          //   context,
-          //   MaterialPageRoute(
-          //     builder: (context) => VehicleDetailScreen(vehicle: vehicle),
-          //   ),
-          // );
+          // Navegar para a tela de detalhes do veículo
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => VehicleDetailScreen(vehicle: vehicle),
+            ),
+          );
         },
         child: Padding(
           padding: const EdgeInsets.all(16),
