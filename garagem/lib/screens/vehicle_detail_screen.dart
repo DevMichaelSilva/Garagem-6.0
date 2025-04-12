@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:garagem/theme/theme_screen.dart';
 import 'package:garagem/services/vehicle_service.dart';
 import 'package:garagem/screens/add_service_screen.dart';
+import 'package:garagem/models/service_model.dart';
+import 'package:intl/intl.dart';
 
 class VehicleDetailScreen extends StatefulWidget {
   final Vehicle vehicle;
@@ -13,7 +15,7 @@ class VehicleDetailScreen extends StatefulWidget {
 }
 
 class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
-  List<Map<String, dynamic>> _services = [];
+  List<ServiceModel> _services = [];
   bool _isLoading = true;
 
   @override
@@ -27,27 +29,42 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
       _isLoading = true;
     });
 
-    // Mock data for services (replace with API call in the future)
-    await Future.delayed(const Duration(seconds: 1));
-    setState(() {
-      _services = [
-        {
-          'id': 1,
-          'type': 'Troca de Óleo',
-          'description': 'Troca de óleo e revisão geral',
-          'date': DateTime.now().subtract(const Duration(days: 5)),
-          'cost': 150.0,
-        },
-        {
-          'id': 2,
-          'type': 'Alinhamento',
-          'description': 'Alinhamento e balanceamento',
-          'date': DateTime.now().subtract(const Duration(days: 30)),
-          'cost': 80.0,
-        },
-      ];
-      _isLoading = false;
-    });
+    try {
+      // No futuro, aqui seria uma chamada real à API
+      await Future.delayed(const Duration(seconds: 1));
+      
+      // Por enquanto, usando dados mock
+      setState(() {
+        _services = [
+          ServiceModel(
+            id: 1,
+            vehicleId: widget.vehicle.id!,
+            serviceType: 'Troca de Óleo',
+            workshop: 'Oficina Central',
+            mechanic: 'José Silva',
+            laborWarrantyDate: '15/07/2025',
+            laborCost: 150.0,
+            dateTime: DateTime.now().subtract(const Duration(days: 5)),
+            imagePaths: [],
+          ),
+          ServiceModel(
+            id: 2,
+            vehicleId: widget.vehicle.id!,
+            serviceType: 'Alinhamento e Balanceamento',
+            workshop: 'Auto Center Express',
+            laborCost: 80.0,
+            dateTime: DateTime.now().subtract(const Duration(days: 30)),
+            imagePaths: [],
+          ),
+        ];
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+        // Em uma implementação real, trataria o erro aqui
+      });
+    }
   }
 
   void _deleteVehicle() {
@@ -98,21 +115,23 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
                 _buildVehicleCard(vehicle),
                 const SizedBox(height: 24),
                 ElevatedButton(
-  onPressed: () async {
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => AddServiceScreen(vehicleId: widget.vehicle.id!),
-      ),
-    );
+                  onPressed: () async {
+                    final result = await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => AddServiceScreen(vehicleId: widget.vehicle.id!),
+                      ),
+                    );
 
-    if (result == true) {
-      _fetchServices(); // Atualiza a lista de serviços após registrar um novo
-    }
-  },
-  style: AppTheme.primaryButtonStyle,
-  child: const Text('Registrar Serviço'),
-),
+                    if (result != null && result is ServiceModel) {
+                      setState(() {
+                        _services.insert(0, result); // Adiciona o novo serviço no início da lista
+                      });
+                    }
+                  },
+                  style: AppTheme.primaryButtonStyle,
+                  child: const Text('Registrar Serviço'),
+                ),
                 const SizedBox(height: 32),
                 _buildServiceList(),
               ],
@@ -317,8 +336,13 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
     );
   }
 
-  Widget _buildServiceCard(Map<String, dynamic> service) {
-    final date = service['date'] as DateTime;
+  Widget _buildServiceCard(ServiceModel service) {
+    final dateFormatter = DateFormat('dd/MM/yyyy');
+    final formattedDate = dateFormatter.format(service.dateTime);
+    
+    double? totalCost = 0;
+    if (service.laborCost != null) totalCost += service.laborCost!;
+    if (service.partsCost != null) totalCost += service.partsCost!;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -332,41 +356,98 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              service['type'],
-              style: AppTheme.titleSmall,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              service['description'],
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.textColorLight),
-            ),
-            const SizedBox(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(
-                  children: [
-                    const Icon(Icons.calendar_today, size: 14, color: AppTheme.textColorLight),
-                    const SizedBox(width: 4),
-                    Text(
-                      '${date.day}/${date.month}/${date.year}',
-                      style: AppTheme.bodySmall,
-                    ),
-                  ],
+                Expanded(
+                  child: Text(
+                    service.serviceType,
+                    style: AppTheme.titleSmall,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-                Row(
-                  children: [
-                    const Icon(Icons.attach_money, size: 14, color: AppTheme.textColorLight),
-                    const SizedBox(width: 4),
-                    Text(
-                      service['cost'].toStringAsFixed(2),
-                      style: AppTheme.bodySmall,
-                    ),
-                  ],
+                Text(
+                  formattedDate,
+                  style: AppTheme.bodySmall,
                 ),
               ],
             ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(
+                  Icons.store,
+                  size: 14,
+                  color: AppTheme.textColorLight,
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    service.workshop,
+                    style: AppTheme.bodyMedium.copyWith(color: AppTheme.textColorLight),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            if (service.mechanic != null && service.mechanic!.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.person,
+                      size: 14,
+                      color: AppTheme.textColorLight,
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        service.mechanic!,
+                        style: AppTheme.bodySmall,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 8),
+            if (totalCost > 0)
+              Row(
+                children: [
+                  Icon(
+                    Icons.attach_money,
+                    size: 16,
+                    color: AppTheme.primaryColor,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    'R\$ ${totalCost.toStringAsFixed(2)}',
+                    style: AppTheme.bodyMedium.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.primaryColor,
+                    ),
+                  ),
+                ],
+              ),
+            if (service.imagePaths.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.image,
+                      size: 14,
+                      color: AppTheme.textColorLight,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '${service.imagePaths.length} imagem(ns)',
+                      style: AppTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
           ],
         ),
       ),

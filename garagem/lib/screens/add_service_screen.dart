@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:garagem/theme/theme_screen.dart';
+import 'package:garagem/models/service_model.dart';
+import 'package:intl/intl.dart';
 
 class AddServiceScreen extends StatefulWidget {
   final int vehicleId; // ID do veículo para associar o serviço
@@ -50,15 +52,53 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       _isSubmitting = true;
     });
 
-    // Mock API call (substituir pelo registro real do serviço no backend)
-    await Future.delayed(const Duration(seconds: 2));
+    try {
+      // Criar o objeto de serviço
+      final service = ServiceModel(
+        vehicleId: widget.vehicleId,
+        serviceType: _serviceController.text.trim(),
+        workshop: _workshopController.text.trim(),
+        mechanic: _mechanicController.text.trim(),
+        laborWarrantyDate: _laborWarrantyController.text.trim(),
+        laborCost: _laborCostController.text.isNotEmpty 
+            ? double.parse(_laborCostController.text) 
+            : null,
+        parts: _partsController.text.trim(),
+        partsStore: _partsStoreController.text.trim(),
+        partsWarrantyDate: _partsWarrantyController.text.trim(),
+        partsCost: _partsCostController.text.isNotEmpty 
+            ? double.parse(_partsCostController.text) 
+            : null,
+        dateTime: _currentDateTime,
+        imagePaths: List.from(_imagePaths),
+      );
 
-    // Sucesso na submissão
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Serviço registrado com sucesso!')),
-    );
+      // Aqui no futuro seria feita uma chamada API para salvar o serviço
+      await Future.delayed(const Duration(seconds: 1));
 
-    Navigator.pop(context, true); // Retorna para a tela anterior
+      // Sucesso na submissão - retorna o novo serviço para a tela anterior
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Serviço registrado com sucesso!'),
+          backgroundColor: AppTheme.successColor,
+        ),
+      );
+
+      Navigator.pop(context, service); // Retorna o serviço para a tela anterior
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erro ao registrar serviço: ${e.toString()}'),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
+    }
   }
 
   @override
@@ -95,6 +135,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                 _buildTextField(_partsWarrantyController, 'Garantia das Peças (Data)', false, TextInputType.datetime),
                 const SizedBox(height: 16),
                 _buildTextField(_partsCostController, 'Valor das Peças (R\$)', false, TextInputType.number),
+                const SizedBox(height: 16),
                 _buildImageUpload(),
                 const SizedBox(height: 32),
                 ElevatedButton(
@@ -120,8 +161,10 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }
 
   Widget _buildDateTimeField() {
+    final formattedDate = DateFormat('dd/MM/yyyy HH:mm').format(_currentDateTime);
+    
     return TextFormField(
-      initialValue: '${_currentDateTime.day}/${_currentDateTime.month}/${_currentDateTime.year} ${_currentDateTime.hour}:${_currentDateTime.minute}',
+      initialValue: formattedDate,
       readOnly: true,
       decoration: AppTheme.inputDecoration('Data e Hora', hintText: 'Gerado automaticamente'),
     );
@@ -160,7 +203,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             if (_imagePaths.length < 4)
               GestureDetector(
                 onTap: () {
-                  // Implementar lógica para selecionar imagens
+                  _selectImage();
                 },
                 child: Container(
                   width: 80,
@@ -178,6 +221,18 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     );
   }
 
+  void _selectImage() {
+    // Por enquanto vamos apenas adicionar um mock de caminho de imagem
+    if (_imagePaths.length < 4) {
+      setState(() {
+        _imagePaths.add('assets/images/sample_image.jpg');
+      });
+    }
+    
+    // Aqui no futuro implementaríamos a seleção de imagem real
+    // com tratamento de tamanho conforme solicitado
+  }
+
   Widget _buildImageThumbnail(String path) {
     return Stack(
       children: [
@@ -186,10 +241,17 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           height: 80,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
-            image: DecorationImage(
-              image: AssetImage(path), // Substituir pelo carregamento correto da imagem
-              fit: BoxFit.cover,
-            ),
+            color: AppTheme.primaryColorLight.withOpacity(0.2),
+            // No futuro substituir por carregamento real da imagem
+            // image: DecorationImage(
+            //   image: AssetImage(path),
+            //   fit: BoxFit.cover,
+            // ),
+          ),
+          child: const Icon(
+            Icons.image,
+            size: 40,
+            color: AppTheme.primaryColorLight,
           ),
         ),
         Positioned(
@@ -201,7 +263,14 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                 _imagePaths.remove(path);
               });
             },
-            child: const Icon(Icons.close, color: Colors.red, size: 24),
+            child: Container(
+              padding: const EdgeInsets.all(2),
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.red,
+              ),
+              child: const Icon(Icons.close, color: Colors.white, size: 16),
+            ),
           ),
         ),
       ],
