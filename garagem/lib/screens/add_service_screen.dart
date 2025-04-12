@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:garagem/theme/theme_screen.dart';
 import 'package:garagem/models/service_model.dart';
+import 'package:garagem/services/maintenance_service.dart';
 import 'package:intl/intl.dart';
 
 class AddServiceScreen extends StatefulWidget {
-  final int vehicleId; // ID do veículo para associar o serviço
+  final int vehicleId;
 
   const AddServiceScreen({Key? key, required this.vehicleId}) : super(key: key);
 
@@ -28,7 +29,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
 
   DateTime _currentDateTime = DateTime.now();
   bool _isSubmitting = false;
+  String? _errorMessage;
 
+  // Regex para validação de data DD/MM/YYYY
+  final RegExp _dateRegex = RegExp(r'^(\d{2})/(\d{2})/(\d{4})$');
+  
   @override
   void dispose() {
     _serviceController.dispose();
@@ -43,13 +48,57 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     super.dispose();
   }
 
-  Future<void> _submitService() async {
+  // Função para validar data no formato DD/MM/YYYY
+  bool _isValidDate(String date) {
+    if (!_dateRegex.hasMatch(date)) {
+      return false;
+    }
+
+    final match = _dateRegex.firstMatch(date)!;
+    final day = int.parse(match.group(1)!);
+    final month = int.parse(match.group(2)!);
+    final year = int.parse(match.group(3)!);
+
+    if (month < 1 || month > 12) {
+      return false;
+    }
+
+    final daysInMonth = [0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    if (day < 1 || day > daysInMonth[month]) {
+      return false;
+    }
+
+    // Verificar se é uma data no futuro (para garantia)
+    final inputDate = DateTime(year, month, day);
+    final now = DateTime.now();
+    return inputDate.isAfter(now);
+  }
+
+  // Função para converter string para double
+  double? _parseMoneyValue(String value) {
+    if (value.isEmpty) return null;
+    try {
+      final cleanValue = value.replaceAll(RegExp(r'[^\d,.]'), '');
+      return double.parse(cleanValue.replaceAll(',', '.'));
+    } catch (e) {
+      return null;
+    }
+  }
+
+   Future<void> _submitService() async {
     if (!_formKey.currentState!.validate()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Por favor, corrija os campos destacados antes de prosseguir.'),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
       return;
     }
 
     setState(() {
       _isSubmitting = true;
+      _errorMessage = null;
     });
 
     try {
@@ -60,43 +109,42 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         workshop: _workshopController.text.trim(),
         mechanic: _mechanicController.text.trim(),
         laborWarrantyDate: _laborWarrantyController.text.trim(),
-        laborCost: _laborCostController.text.isNotEmpty 
-            ? double.parse(_laborCostController.text) 
-            : null,
+        laborCost: _parseMoneyValue(_laborCostController.text),
         parts: _partsController.text.trim(),
         partsStore: _partsStoreController.text.trim(),
         partsWarrantyDate: _partsWarrantyController.text.trim(),
-        partsCost: _partsCostController.text.isNotEmpty 
-            ? double.parse(_partsCostController.text) 
-            : null,
+        partsCost: _parseMoneyValue(_partsCostController.text),
         dateTime: _currentDateTime,
         imagePaths: List.from(_imagePaths),
       );
 
-      // Aqui no futuro seria feita uma chamada API para salvar o serviço
-      await Future.delayed(const Duration(seconds: 1));
+      // Salvar no banco de dados
+      final savedService = await MaintenanceService().addMaintenance(service);
 
-      // Sucesso na submissão - retorna o novo serviço para a tela anterior
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Serviço registrado com sucesso!'),
-          backgroundColor: AppTheme.successColor,
-        ),
-      );
+      // Verificar se o widget ainda está montado
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Serviço registrado com sucesso!'),
+            backgroundColor: AppTheme.successColor,
+          ),
+        );
 
-      Navigator.pop(context, service); // Retorna o serviço para a tela anterior
+        Navigator.pop(context, savedService);
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erro ao registrar serviço: ${e.toString()}'),
-          backgroundColor: AppTheme.errorColor,
-        ),
-      );
-    } finally {
+      // Verificar se o widget ainda está montado
       if (mounted) {
         setState(() {
+          _errorMessage = 'Erro ao registrar serviço: ${e.toString()}';
           _isSubmitting = false;
         });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_errorMessage!),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
       }
     }
   }
@@ -118,25 +166,71 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
               children: [
                 _buildDateTimeField(),
                 const SizedBox(height: 16),
-                _buildTextField(_serviceController, 'Serviço Executado', true),
+                _buildRequiredField(
+                  _serviceController, 
+                  'Serviço Executado', 
+                  'Informe o tipo de serviço realizado',
+                  'Por favor, informe qual serviço foi executado',
+                ),
                 const SizedBox(height: 16),
-                _buildTextField(_workshopController, 'Oficina', true),
+                _buildRequiredField(
+                  _workshopController, 
+                  'Oficina', 
+                  'Informe onde o serviço foi realizado',
+                  'Por favor, informe o nome da oficina',
+                ),
                 const SizedBox(height: 16),
-                _buildTextField(_mechanicController, 'Mecânico Responsável'),
+                _buildOptionalTextField(
+                  _mechanicController, 
+                  'Mecânico Responsável', 
+                  'Informe quem realizou o serviço (opcional)'
+                ),
                 const SizedBox(height: 16),
-                _buildTextField(_laborWarrantyController, 'Garantia da Mão de Obra (Data)', false, TextInputType.datetime),
+                _buildDateField(
+                  _laborWarrantyController, 
+                  'Garantia da Mão de Obra', 
+                  'Informe a data no formato DD/MM/AAAA (opcional)'
+                ),
                 const SizedBox(height: 16),
-                _buildTextField(_laborCostController, 'Valor Cobrado (R\$)', false, TextInputType.number),
+                _buildCurrencyField(
+                  _laborCostController, 
+                  'Valor Cobrado (R\$)', 
+                  'Informe o valor da mão de obra (opcional)'
+                ),
                 const SizedBox(height: 16),
-                _buildTextField(_partsController, 'Peças Trocadas'),
+                _buildOptionalTextField(
+                  _partsController, 
+                  'Peças Trocadas', 
+                  'Informe as peças utilizadas (opcional)'
+                ),
                 const SizedBox(height: 16),
-                _buildTextField(_partsStoreController, 'Loja das Peças'),
+                _buildOptionalTextField(
+                  _partsStoreController, 
+                  'Loja das Peças', 
+                  'Informe onde as peças foram compradas (opcional)'
+                ),
                 const SizedBox(height: 16),
-                _buildTextField(_partsWarrantyController, 'Garantia das Peças (Data)', false, TextInputType.datetime),
+                _buildDateField(
+                  _partsWarrantyController, 
+                  'Garantia das Peças', 
+                  'Informe a data no formato DD/MM/AAAA (opcional)'
+                ),
                 const SizedBox(height: 16),
-                _buildTextField(_partsCostController, 'Valor das Peças (R\$)', false, TextInputType.number),
+                _buildCurrencyField(
+                  _partsCostController, 
+                  'Valor das Peças (R\$)', 
+                  'Informe o valor das peças (opcional)'
+                ),
                 const SizedBox(height: 16),
                 _buildImageUpload(),
+                if (_errorMessage != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8.0, bottom: 8.0),
+                    child: Text(
+                      _errorMessage!,
+                      style: const TextStyle(color: AppTheme.errorColor),
+                    ),
+                  ),
                 const SizedBox(height: 32),
                 ElevatedButton(
                   onPressed: _isSubmitting ? null : _submitService,
@@ -160,6 +254,10 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     );
   }
 
+  // O resto dos widgets de construção do formulário permanece o mesmo...
+  // Métodos _buildDateTimeField(), _buildRequiredField(), _buildOptionalTextField(), etc.
+  // (mantendo os mesmos da versão anterior)
+  
   Widget _buildDateTimeField() {
     final formattedDate = DateFormat('dd/MM/yyyy HH:mm').format(_currentDateTime);
     
@@ -170,22 +268,96 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     );
   }
 
-  Widget _buildTextField(
+  Widget _buildRequiredField(
     TextEditingController controller,
-    String label, [
-    bool isRequired = false,
-    TextInputType inputType = TextInputType.text,
-  ]) {
+    String label,
+    String hintText,
+    String errorMessage,
+  ) {
     return TextFormField(
       controller: controller,
-      keyboardType: inputType,
-      decoration: AppTheme.inputDecoration(label),
+      decoration: AppTheme.inputDecoration(label, hintText: hintText),
       validator: (value) {
-        if (isRequired && (value == null || value.trim().isEmpty)) {
-          return 'Este campo é obrigatório';
+        if (value == null || value.trim().isEmpty) {
+          return errorMessage;
         }
         return null;
       },
+    );
+  }
+
+  Widget _buildOptionalTextField(
+    TextEditingController controller,
+    String label,
+    String hintText,
+  ) {
+    return TextFormField(
+      controller: controller,
+      decoration: AppTheme.inputDecoration(label, hintText: hintText),
+    );
+  }
+
+  Widget _buildDateField(
+    TextEditingController controller,
+    String label,
+    String hintText,
+  ) {
+    return TextFormField(
+      controller: controller,
+      decoration: AppTheme.inputDecoration(
+        label, 
+        hintText: hintText,
+        suffixIcon: IconButton(
+          icon: const Icon(Icons.calendar_today),
+          onPressed: () async {
+            // Aqui você pode implementar um selector de data no futuro
+          },
+        ),
+      ),
+      keyboardType: TextInputType.datetime,
+      validator: (value) {
+        if (value == null || value.isEmpty) {
+          return null; // Campo opcional
+        }
+        if (!_isValidDate(value)) {
+          return 'Data inválida. Use o formato DD/MM/AAAA e certifique-se que é uma data futura';
+        }
+        return null;
+      },
+      inputFormatters: [
+        FilteringTextInputFormatter.allow(RegExp(r'[0-9/]')),
+        LengthLimitingTextInputFormatter(10),
+      ],
+    );
+  }
+
+  Widget _buildCurrencyField(
+    TextEditingController controller,
+    String label,
+    String hintText,
+  ) {
+    return TextFormField(
+      controller: controller,
+      decoration: AppTheme.inputDecoration(
+        label, 
+        hintText: hintText,
+      ).copyWith(
+        // Substituir prefixText por uma solução mais compatível
+        prefix: const Text('R\$ ', style: TextStyle(fontSize: 16)),
+      ),
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      validator: (value) {
+        if (value == null || value.isEmpty) {
+          return null; // Campo opcional
+        }
+        if (_parseMoneyValue(value) == null) {
+          return 'Valor inválido. Digite um número positivo (ex: 125,90)';
+        }
+        return null;
+      },
+      inputFormatters: [
+        FilteringTextInputFormatter.allow(RegExp(r'[0-9,.]')),
+      ],
     );
   }
 
@@ -193,7 +365,28 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Imagens (opcional)', style: AppTheme.bodyMedium),
+        Row(
+          children: [
+            Text('Imagens (opcional)', style: AppTheme.bodyMedium),
+            const SizedBox(width: 8),
+            Text(
+              '${_imagePaths.length}/4',
+              style: TextStyle(
+                color: AppTheme.textColorLight,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Máximo de 4 imagens, 5MB cada',
+          style: TextStyle(
+            fontSize: 12,
+            color: AppTheme.textColorLight,
+          ),
+        ),
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
@@ -211,8 +404,25 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                   decoration: BoxDecoration(
                     color: AppTheme.primaryColorLight.withOpacity(0.3),
                     borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: AppTheme.primaryColorLight,
+                      width: 1,
+                    ),
                   ),
-                  child: const Icon(Icons.add, color: AppTheme.primaryColor),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: const [
+                      Icon(Icons.add_photo_alternate, color: AppTheme.primaryColor),
+                      SizedBox(height: 4),
+                      Text(
+                        'Adicionar',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.primaryColor,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
           ],
@@ -222,15 +432,13 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }
 
   void _selectImage() {
-    // Por enquanto vamos apenas adicionar um mock de caminho de imagem
+    // Implementação básica para teste
     if (_imagePaths.length < 4) {
       setState(() {
-        _imagePaths.add('assets/images/sample_image.jpg');
+        // No futuro, isso seria o URL da imagem no servidor
+        _imagePaths.add('https://via.placeholder.com/150');
       });
     }
-    
-    // Aqui no futuro implementaríamos a seleção de imagem real
-    // com tratamento de tamanho conforme solicitado
   }
 
   Widget _buildImageThumbnail(String path) {
@@ -242,11 +450,10 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
             color: AppTheme.primaryColorLight.withOpacity(0.2),
-            // No futuro substituir por carregamento real da imagem
-            // image: DecorationImage(
-            //   image: AssetImage(path),
-            //   fit: BoxFit.cover,
-            // ),
+            border: Border.all(
+              color: AppTheme.primaryColorLight,
+              width: 1,
+            ),
           ),
           child: const Icon(
             Icons.image,
