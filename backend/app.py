@@ -2,6 +2,7 @@ import logging
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
+from flask_migrate import Migrate
 from extensions import db
 from models import User, Vehicle, Maintenance, MaintenanceImage
 from routes.auth_routes import auth_bp

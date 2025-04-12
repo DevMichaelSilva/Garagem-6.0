@@ -27,7 +27,9 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
     _fetchServices();
   }
 
-    Future<void> _fetchServices() async {
+  Future<void> _fetchServices() async {
+    if (!mounted) return;
+    
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -35,8 +37,6 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
 
     try {
       final services = await _maintenanceService.getMaintenancesByVehicle(widget.vehicle.id!);
-      
-      // Verifique se o widget ainda está montado antes de chamar setState
       if (mounted) {
         setState(() {
           _services = services;
@@ -44,7 +44,6 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
         });
       }
     } catch (e) {
-      // Verifique se o widget ainda está montado antes de chamar setState
       if (mounted) {
         setState(() {
           _errorMessage = e.toString();
@@ -81,7 +80,6 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
       if (confirmed) {
         await _maintenanceService.deleteMaintenance(service.id!);
         
-        // Verifique se o widget ainda está montado antes de mostrar o SnackBar
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -95,7 +93,6 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
         }
       }
     } catch (e) {
-      // Verifique se o widget ainda está montado antes de mostrar o SnackBar
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -106,34 +103,11 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
       }
     }
   }
-  
-  void _deleteVehicle() {
-    // Dialog para confirmação de exclusão
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Excluir Veículo'),
-          content: const Text('Tem certeza de que deseja excluir este veículo?'),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-              child: const Text('Cancelar'),
-            ),
-            TextButton(
-              onPressed: () {
-                // Implementar exclusão do veículo
-                Navigator.of(context).pop();
-                Navigator.of(context).pop(true); // Retorna para a tela anterior
-              },
-              child: const Text('Excluir', style: TextStyle(color: Colors.red)),
-            ),
-          ],
-        );
-      },
-    );
+
+  @override
+  void dispose() {
+    // Limpar recursos se necessário
+    super.dispose();
   }
 
   @override
@@ -171,7 +145,7 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
                       }
                     },
                     style: AppTheme.primaryButtonStyle,
-                    child: const Text('Registrar Serviço'),
+                    child: const Text('REGISTRAR SERVIÇO'),
                   ),
                   const SizedBox(height: 32),
                   _buildServiceList(),
@@ -297,30 +271,7 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
                 ),
               ],
             ),
-            const Divider(height: 24),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                TextButton.icon(
-                  onPressed: () {
-                    // Transferir funcionalidade a ser implementada
-                  },
-                  icon: const Icon(Icons.swap_horiz, color: AppTheme.primaryColor),
-                  label: const Text(
-                    'Transferir Veículo',
-                    style: TextStyle(color: AppTheme.primaryColor),
-                  ),
-                ),
-                TextButton.icon(
-                  onPressed: _deleteVehicle,
-                  icon: const Icon(Icons.delete, color: Colors.red),
-                  label: const Text(
-                    'Excluir Veículo',
-                    style: TextStyle(color: Colors.red),
-                  ),
-                ),
-              ],
-            ),
+            // Os botões "Transferir" e "Excluir" foram removidos daqui
           ],
         ),
       ),
