@@ -4,7 +4,9 @@ import 'package:garagem/services/vehicle_service.dart';
 import 'package:garagem/services/maintenance_service.dart';
 import 'package:garagem/screens/add_service_screen.dart';
 import 'package:garagem/models/service_model.dart';
+import 'package:garagem/screens/image_viewer_screen.dart';
 import 'package:intl/intl.dart';
+import 'package:garagem/screens/service_detail_screen.dart';
 
 class VehicleDetailScreen extends StatefulWidget {
   final Vehicle vehicle;
@@ -103,7 +105,7 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
       }
     }
   }
-
+    
   @override
   void dispose() {
     // Limpar recursos se necessário
@@ -271,7 +273,6 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
                 ),
               ],
             ),
-            // Os botões "Transferir" e "Excluir" foram removidos daqui
           ],
         ),
       ),
@@ -371,54 +372,65 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
   }
 
   Widget _buildServiceCard(ServiceModel service) {
-    final dateFormatter = DateFormat('dd/MM/yyyy');
-    final formattedDate = dateFormatter.format(service.dateTime);
-    
-    double totalCost = 0;
-    if (service.laborCost != null) totalCost += service.laborCost!;
-    if (service.partsCost != null) totalCost += service.partsCost!;
+  final dateFormatter = DateFormat('dd/MM/yyyy');
+  final formattedDate = dateFormatter.format(service.dateTime);
+  
+  double totalCost = 0;
+  if (service.laborCost != null) totalCost += service.laborCost!;
+  if (service.partsCost != null) totalCost += service.partsCost!;
 
-    return Dismissible(
-      key: Key(service.id?.toString() ?? UniqueKey().toString()),
-      direction: DismissDirection.endToStart,
-      background: Container(
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 20),
-        color: Colors.red,
-        child: const Icon(
-          Icons.delete,
-          color: Colors.white,
-        ),
+  return Dismissible(
+    key: Key(service.id?.toString() ?? UniqueKey().toString()),
+    direction: DismissDirection.endToStart,
+    background: Container(
+      alignment: Alignment.centerRight,
+      padding: const EdgeInsets.only(right: 20),
+      color: Colors.red,
+      child: const Icon(
+        Icons.delete,
+        color: Colors.white,
       ),
-      confirmDismiss: (direction) async {
-        return await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('Confirmar Exclusão'),
-            content: Text('Deseja realmente excluir o serviço "${service.serviceType}"?'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('CANCELAR'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('EXCLUIR', style: TextStyle(color: Colors.red)),
-              ),
-            ],
-          ),
-        ) ?? false;
-      },
-      onDismissed: (direction) {
-        _deleteMaintenance(service);
-      },
-      child: Card(
-        margin: const EdgeInsets.only(bottom: 16),
-        elevation: 2,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-          side: BorderSide(color: AppTheme.primaryColorLight.withOpacity(0.3), width: 1),
+    ),
+    confirmDismiss: (direction) async {
+      return await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Confirmar Exclusão'),
+          content: Text('Deseja realmente excluir o serviço "${service.serviceType}"?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('CANCELAR'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('EXCLUIR', style: TextStyle(color: Colors.red)),
+            ),
+          ],
         ),
+      ) ?? false;
+    },
+    onDismissed: (direction) {
+      _deleteMaintenance(service);
+    },
+    child: Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: AppTheme.primaryColorLight.withOpacity(0.3), width: 1),
+      ),
+      child: InkWell(
+        onTap: () {
+          // Navegação para a tela de detalhes ao invés de editar
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ServiceDetailScreen(service: service),
+            ),
+          );
+        },
+        borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.all(16.0),
           child: Column(
@@ -499,23 +511,7 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
                   ],
                 ),
               if (service.imagePaths.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.image,
-                        size: 14,
-                        color: AppTheme.textColorLight,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        '${service.imagePaths.length} imagem(ns)',
-                        style: AppTheme.bodySmall,
-                      ),
-                    ],
-                  ),
-                ),
+                _buildServiceImagePreview(service.imagePaths),
               const SizedBox(height: 8),
               Align(
                 alignment: Alignment.centerRight,
@@ -532,6 +528,97 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
           ),
         ),
       ),
+    ),
+  );
+}
+
+  Widget _buildServiceImagePreview(List<String> imagePaths) {
+    if (imagePaths.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(),
+        const SizedBox(height: 4),
+        Text(
+          'Imagens (${imagePaths.length})',
+          style: AppTheme.bodySmall.copyWith(
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 80,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            itemCount: imagePaths.length,
+            itemBuilder: (context, index) {
+              String imagePath = imagePaths[index];
+              // Converter URL relativa para absoluta se necessário
+              if (imagePath.startsWith('/uploads/')) {
+                imagePath = 'http://127.0.0.1:5000$imagePath';
+              }
+              // Ignorar imagens em base64 para visualização
+              if (imagePath.startsWith('data:image/')) {
+                return const SizedBox.shrink();
+              }
+              
+              return GestureDetector(
+                onTap: () {
+                  // Abrir visualizador de imagem em tela cheia
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => ImageViewerScreen(
+                        imageUrls: imagePaths.where((path) => !path.startsWith('data:image/')).map((path) {
+                          if (path.startsWith('/uploads/')) {
+                            return 'http://127.0.0.1:5000$path';
+                          }
+                          return path;
+                        }).toList(),
+                        initialIndex: index,
+                      ),
+                    ),
+                  );
+                },
+                child: Container(
+                  width: 80,
+                  height: 80,
+                  margin: const EdgeInsets.only(right: 8),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppTheme.primaryColorLight),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.network(
+                      imagePath,
+                      fit: BoxFit.cover,
+                      loadingBuilder: (context, child, loadingProgress) {
+                        if (loadingProgress == null) return child;
+                        return Center(
+                          child: CircularProgressIndicator(
+                            value: loadingProgress.expectedTotalBytes != null
+                                ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                                : null,
+                          ),
+                        );
+                      },
+                      errorBuilder: (context, error, stackTrace) {
+                        return const Center(
+                          child: Icon(Icons.broken_image, color: Colors.grey),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }

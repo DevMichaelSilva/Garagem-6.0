@@ -12,6 +12,8 @@ class ServiceModel {
   final double? partsCost;
   final DateTime dateTime;
   final List<String> imagePaths;
+  final List<int>? imageIds;
+  
 
   ServiceModel({
     this.id,
@@ -27,6 +29,7 @@ class ServiceModel {
     this.partsCost,
     required this.dateTime,
     this.imagePaths = const [],
+    this.imageIds,
   });
 
   // Converte o modelo para um mapa para facilitar a exibição e serialização

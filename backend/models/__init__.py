@@ -43,6 +43,9 @@ class Maintenance(db.Model):
 
 class MaintenanceImage(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    maintenance_id = db.Column(db.Integer, db.ForeignKey('maintenance.id'), nullable=False)
+    maintenance_id = db.Column(db.Integer, db.ForeignKey('maintenance.id', ondelete='CASCADE'), nullable=False)
     image_url = db.Column(db.String(255), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    def __repr__(self):
+        return f"<MaintenanceImage {self.id}>"

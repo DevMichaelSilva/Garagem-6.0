@@ -4,6 +4,16 @@ from models import Maintenance, MaintenanceImage, Vehicle, User
 import jwt
 from functools import wraps
 from datetime import datetime
+import sys
+import os
+# Adicionar o diretório pai ao caminho do sistema para importação
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from utils.image_utils import save_image
+import logging
+
+# Configurar logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 maintenance_bp = Blueprint('maintenance', __name__)
 
@@ -21,8 +31,9 @@ def token_required(f):
             current_user = User.query.get(data['user_id'])
             if not current_user:
                 return jsonify({'message': 'Usuário não encontrado'}), 401
-        except:
-            return jsonify({'message': 'Token inválido'}), 401
+        except Exception as e:
+            logger.error(f"Erro na autenticação: {str(e)}")
+            return jsonify({'message': f'Token inválido: {str(e)}'}), 401
             
         return f(current_user, *args, **kwargs)
     
@@ -74,72 +85,97 @@ def add_maintenance(current_user):
     Adiciona uma nova manutenção para um veículo.
     Campos obrigatórios: vehicle_id, service_type, workshop
     """
-    data = request.get_json()
-    
-    # Verificar se os campos obrigatórios estão presentes
-    if not data or not data.get('vehicle_id') or not data.get('service_type') or not data.get('workshop'):
-        return jsonify({'message': 'Campos obrigatórios não fornecidos'}), 400
-    
-    # Verificar se o veículo pertence ao usuário atual
-    vehicle = Vehicle.query.filter_by(id=data['vehicle_id'], user_id=current_user.id).first()
-    if not vehicle:
-        return jsonify({'message': 'Veículo não encontrado ou não pertence a este usuário'}), 404
-    
-    # Criar nova manutenção
     try:
-        # Processar a data do serviço, se fornecida, ou usar a data/hora atual
-        service_date = datetime.strptime(data.get('service_date', ''), '%Y-%m-%d %H:%M:%S') if data.get('service_date') else datetime.utcnow()
+        data = request.get_json()
+        logger.debug(f"Dados recebidos: {data}")
         
-        new_maintenance = Maintenance(
-            vehicle_id=data['vehicle_id'],
-            service_type=data['service_type'],
-            workshop=data['workshop'],
-            mechanic=data.get('mechanic'),
-            labor_warranty_date=data.get('labor_warranty_date'),
-            labor_cost=data.get('labor_cost'),
-            parts=data.get('parts'),
-            parts_store=data.get('parts_store'),
-            parts_warranty_date=data.get('parts_warranty_date'),
-            parts_cost=data.get('parts_cost'),
-            service_date=service_date
-        )
+        # Verificar se os campos obrigatórios estão presentes
+        if not data or not data.get('vehicle_id') or not data.get('service_type') or not data.get('workshop'):
+            return jsonify({'message': 'Campos obrigatórios não fornecidos'}), 400
         
-        db.session.add(new_maintenance)
-        db.session.flush()  # Para obter o ID antes do commit final
+        # Verificar se o veículo pertence ao usuário atual
+        vehicle = Vehicle.query.filter_by(id=data['vehicle_id'], user_id=current_user.id).first()
+        if not vehicle:
+            return jsonify({'message': 'Veículo não encontrado ou não pertence a este usuário'}), 404
         
-        # Adicionar imagens se fornecidas
-        if data.get('images'):
-            for image_url in data['images']:
-                new_image = MaintenanceImage(
-                    maintenance_id=new_maintenance.id,
-                    image_url=image_url
-                )
-                db.session.add(new_image)
-        
-        db.session.commit()
-        
-        # Preparar a resposta
-        response_data = {
-            'id': new_maintenance.id,
-            'vehicle_id': new_maintenance.vehicle_id,
-            'service_type': new_maintenance.service_type,
-            'workshop': new_maintenance.workshop,
-            'mechanic': new_maintenance.mechanic,
-            'labor_warranty_date': new_maintenance.labor_warranty_date,
-            'labor_cost': new_maintenance.labor_cost,
-            'parts': new_maintenance.parts,
-            'parts_store': new_maintenance.parts_store,
-            'parts_warranty_date': new_maintenance.parts_warranty_date,
-            'parts_cost': new_maintenance.parts_cost,
-            'service_date': new_maintenance.service_date.strftime('%Y-%m-%d %H:%M:%S'),
-            'created_at': new_maintenance.created_at.strftime('%Y-%m-%d %H:%M:%S'),
-            'images': data.get('images', [])
-        }
-        
-        return jsonify({'message': 'Manutenção adicionada com sucesso', 'maintenance': response_data}), 201
-        
+        # Criar nova manutenção
+        try:
+            # Processar a data do serviço, se fornecida, ou usar a data/hora atual
+            service_date = datetime.strptime(data.get('service_date', ''), '%Y-%m-%d %H:%M:%S') if data.get('service_date') else datetime.utcnow()
+            
+            new_maintenance = Maintenance(
+                vehicle_id=data['vehicle_id'],
+                service_type=data['service_type'],
+                workshop=data['workshop'],
+                mechanic=data.get('mechanic'),
+                labor_warranty_date=data.get('labor_warranty_date'),
+                labor_cost=data.get('labor_cost'),
+                parts=data.get('parts'),
+                parts_store=data.get('parts_store'),
+                parts_warranty_date=data.get('parts_warranty_date'),
+                parts_cost=data.get('parts_cost'),
+                service_date=service_date
+            )
+            
+            db.session.add(new_maintenance)
+            db.session.flush()  # Para obter o ID antes do commit final
+            
+            # Lista para armazenar URLs de imagens processadas
+            processed_images = []
+            
+            # Adicionar imagens se fornecidas
+            if data.get('images'):
+                for image_data in data['images']:
+                    # Se for apenas uma URL já existente, adiciona diretamente
+                    if isinstance(image_data, str) and (image_data.startswith('/uploads/') or image_data.startswith('http')):
+                        new_image = MaintenanceImage(
+                            maintenance_id=new_maintenance.id,
+                            image_url=image_data
+                        )
+                        db.session.add(new_image)
+                        processed_images.append(image_data)
+                    # Se for dados base64, processa a imagem
+                    elif isinstance(image_data, str) and image_data.startswith('data:image/'):
+                        filename, error = save_image(image_data)
+                        if not error:
+                            image_url = f"/uploads/images/{filename}"
+                            new_image = MaintenanceImage(
+                                maintenance_id=new_maintenance.id,
+                                image_url=image_url
+                            )
+                            db.session.add(new_image)
+                            processed_images.append(image_url)
+            
+            db.session.commit()
+            
+            # Preparar a resposta
+            response_data = {
+                'id': new_maintenance.id,
+                'vehicle_id': new_maintenance.vehicle_id,
+                'service_type': new_maintenance.service_type,
+                'workshop': new_maintenance.workshop,
+                'mechanic': new_maintenance.mechanic,
+                'labor_warranty_date': new_maintenance.labor_warranty_date,
+                'labor_cost': new_maintenance.labor_cost,
+                'parts': new_maintenance.parts,
+                'parts_store': new_maintenance.parts_store,
+                'parts_warranty_date': new_maintenance.parts_warranty_date,
+                'parts_cost': new_maintenance.parts_cost,
+                'service_date': new_maintenance.service_date.strftime('%Y-%m-%d %H:%M:%S'),
+                'created_at': new_maintenance.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                'images': processed_images
+            }
+            
+            return jsonify({'message': 'Manutenção adicionada com sucesso', 'maintenance': response_data}), 201
+            
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Erro ao adicionar manutenção: {str(e)}")
+            return jsonify({'message': f'Erro ao adicionar manutenção: {str(e)}'}), 500
+    
     except Exception as e:
         db.session.rollback()
+        logger.exception(f"Erro não tratado ao adicionar manutenção: {str(e)}")
         return jsonify({'message': f'Erro ao adicionar manutenção: {str(e)}'}), 500
 
 @maintenance_bp.route('/<int:maintenance_id>', methods=['DELETE'])
@@ -149,17 +185,17 @@ def delete_maintenance(current_user, maintenance_id):
     Exclui uma manutenção específica.
     Verifica se a manutenção pertence a um veículo do usuário atual.
     """
-    # Buscar a manutenção
-    maintenance = Maintenance.query.get(maintenance_id)
-    if not maintenance:
-        return jsonify({'message': 'Manutenção não encontrada'}), 404
-    
-    # Verificar se o veículo pertence ao usuário
-    vehicle = Vehicle.query.filter_by(id=maintenance.vehicle_id, user_id=current_user.id).first()
-    if not vehicle:
-        return jsonify({'message': 'Veículo não pertence a este usuário'}), 403
-    
     try:
+        # Buscar a manutenção
+        maintenance = Maintenance.query.get(maintenance_id)
+        if not maintenance:
+            return jsonify({'message': 'Manutenção não encontrada'}), 404
+        
+        # Verificar se o veículo pertence ao usuário
+        vehicle = Vehicle.query.filter_by(id=maintenance.vehicle_id, user_id=current_user.id).first()
+        if not vehicle:
+            return jsonify({'message': 'Veículo não pertence a este usuário'}), 403
+        
         # Excluir a manutenção e suas imagens (cascade)
         db.session.delete(maintenance)
         db.session.commit()
@@ -167,6 +203,7 @@ def delete_maintenance(current_user, maintenance_id):
         return jsonify({'message': 'Manutenção excluída com sucesso'}), 200
     except Exception as e:
         db.session.rollback()
+        logger.error(f"Erro ao excluir manutenção: {str(e)}")
         return jsonify({'message': f'Erro ao excluir manutenção: {str(e)}'}), 500
 
 @maintenance_bp.route('/<int:maintenance_id>', methods=['GET'])
@@ -176,37 +213,41 @@ def get_maintenance_details(current_user, maintenance_id):
     Retorna os detalhes de uma manutenção específica.
     Verifica se a manutenção pertence a um veículo do usuário atual.
     """
-    # Buscar a manutenção
-    maintenance = Maintenance.query.get(maintenance_id)
-    if not maintenance:
-        return jsonify({'message': 'Manutenção não encontrada'}), 404
-    
-    # Verificar se o veículo pertence ao usuário
-    vehicle = Vehicle.query.filter_by(id=maintenance.vehicle_id, user_id=current_user.id).first()
-    if not vehicle:
-        return jsonify({'message': 'Veículo não pertence a este usuário'}), 403
-    
-    # Obter as imagens relacionadas a esta manutenção
-    images = [image.image_url for image in maintenance.images]
-    
-    maintenance_data = {
-        'id': maintenance.id,
-        'vehicle_id': maintenance.vehicle_id,
-        'service_type': maintenance.service_type,
-        'workshop': maintenance.workshop,
-        'mechanic': maintenance.mechanic,
-        'labor_warranty_date': maintenance.labor_warranty_date,
-        'labor_cost': maintenance.labor_cost,
-        'parts': maintenance.parts,
-        'parts_store': maintenance.parts_store,
-        'parts_warranty_date': maintenance.parts_warranty_date,
-        'parts_cost': maintenance.parts_cost,
-        'service_date': maintenance.service_date.strftime('%Y-%m-%d %H:%M:%S'),
-        'created_at': maintenance.created_at.strftime('%Y-%m-%d %H:%M:%S'),
-        'images': images
-    }
-    
-    return jsonify({'maintenance': maintenance_data}), 200
+    try:
+        # Buscar a manutenção
+        maintenance = Maintenance.query.get(maintenance_id)
+        if not maintenance:
+            return jsonify({'message': 'Manutenção não encontrada'}), 404
+        
+        # Verificar se o veículo pertence ao usuário
+        vehicle = Vehicle.query.filter_by(id=maintenance.vehicle_id, user_id=current_user.id).first()
+        if not vehicle:
+            return jsonify({'message': 'Veículo não pertence a este usuário'}), 403
+        
+        # Obter as imagens relacionadas a esta manutenção
+        images = [image.image_url for image in maintenance.images]
+        
+        maintenance_data = {
+            'id': maintenance.id,
+            'vehicle_id': maintenance.vehicle_id,
+            'service_type': maintenance.service_type,
+            'workshop': maintenance.workshop,
+            'mechanic': maintenance.mechanic,
+            'labor_warranty_date': maintenance.labor_warranty_date,
+            'labor_cost': maintenance.labor_cost,
+            'parts': maintenance.parts,
+            'parts_store': maintenance.parts_store,
+            'parts_warranty_date': maintenance.parts_warranty_date,
+            'parts_cost': maintenance.parts_cost,
+            'service_date': maintenance.service_date.strftime('%Y-%m-%d %H:%M:%S'),
+            'created_at': maintenance.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+            'images': images
+        }
+        
+        return jsonify({'maintenance': maintenance_data}), 200
+    except Exception as e:
+        logger.error(f"Erro ao buscar detalhes da manutenção: {str(e)}")
+        return jsonify({'message': f'Erro ao buscar detalhes da manutenção: {str(e)}'}), 500
 
 @maintenance_bp.route('/<int:maintenance_id>', methods=['PUT'])
 @token_required
@@ -215,19 +256,19 @@ def update_maintenance(current_user, maintenance_id):
     Atualiza os dados de uma manutenção existente.
     Verifica se a manutenção pertence a um veículo do usuário atual.
     """
-    data = request.get_json()
-    
-    # Buscar a manutenção
-    maintenance = Maintenance.query.get(maintenance_id)
-    if not maintenance:
-        return jsonify({'message': 'Manutenção não encontrada'}), 404
-    
-    # Verificar se o veículo pertence ao usuário
-    vehicle = Vehicle.query.filter_by(id=maintenance.vehicle_id, user_id=current_user.id).first()
-    if not vehicle:
-        return jsonify({'message': 'Veículo não pertence a este usuário'}), 403
-    
     try:
+        data = request.get_json()
+        
+        # Buscar a manutenção
+        maintenance = Maintenance.query.get(maintenance_id)
+        if not maintenance:
+            return jsonify({'message': 'Manutenção não encontrada'}), 404
+        
+        # Verificar se o veículo pertence ao usuário
+        vehicle = Vehicle.query.filter_by(id=maintenance.vehicle_id, user_id=current_user.id).first()
+        if not vehicle:
+            return jsonify({'message': 'Veículo não pertence a este usuário'}), 403
+        
         # Atualizar campos (apenas se fornecidos)
         if data.get('service_type'):
             maintenance.service_type = data['service_type']
@@ -250,22 +291,57 @@ def update_maintenance(current_user, maintenance_id):
         if data.get('service_date'):
             maintenance.service_date = datetime.strptime(data['service_date'], '%Y-%m-%d %H:%M:%S')
         
+        # Lista para armazenar URLs de imagens processadas
+        processed_images = []
+        
         # Atualizar imagens se fornecidas
         if 'images' in data:
             # Remover imagens existentes
             MaintenanceImage.query.filter_by(maintenance_id=maintenance.id).delete()
             
             # Adicionar novas imagens
-            for image_url in data['images']:
-                new_image = MaintenanceImage(
-                    maintenance_id=maintenance.id,
-                    image_url=image_url
-                )
-                db.session.add(new_image)
+            for image_data in data['images']:
+                # Se for apenas uma URL já existente, adiciona diretamente
+                if isinstance(image_data, str) and (image_data.startswith('/uploads/') or image_data.startswith('http')):
+                    new_image = MaintenanceImage(
+                        maintenance_id=maintenance.id,
+                        image_url=image_data
+                    )
+                    db.session.add(new_image)
+                    processed_images.append(image_data)
+                # Se for dados base64, processa a imagem
+                elif isinstance(image_data, str) and image_data.startswith('data:image/'):
+                    filename, error = save_image(image_data)
+                    if not error:
+                        image_url = f"/uploads/images/{filename}"
+                        new_image = MaintenanceImage(
+                            maintenance_id=maintenance.id,
+                            image_url=image_url
+                        )
+                        db.session.add(new_image)
+                        processed_images.append(image_url)
         
         db.session.commit()
         
-        return jsonify({'message': 'Manutenção atualizada com sucesso'}), 200
+        maintenance_data = {
+            'id': maintenance.id,
+            'vehicle_id': maintenance.vehicle_id,
+            'service_type': maintenance.service_type,
+            'workshop': maintenance.workshop,
+            'mechanic': maintenance.mechanic,
+            'labor_warranty_date': maintenance.labor_warranty_date,
+            'labor_cost': maintenance.labor_cost,
+            'parts': maintenance.parts,
+            'parts_store': maintenance.parts_store,
+            'parts_warranty_date': maintenance.parts_warranty_date,
+            'parts_cost': maintenance.parts_cost,
+            'service_date': maintenance.service_date.strftime('%Y-%m-%d %H:%M:%S'),
+            'created_at': maintenance.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+            'images': processed_images if processed_images else [image.image_url for image in maintenance.images]
+        }
+        
+        return jsonify({'message': 'Manutenção atualizada com sucesso', 'maintenance': maintenance_data}), 200
     except Exception as e:
         db.session.rollback()
+        logger.error(f"Erro ao atualizar manutenção: {str(e)}")
         return jsonify({'message': f'Erro ao atualizar manutenção: {str(e)}'}), 500

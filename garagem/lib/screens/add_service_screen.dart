@@ -1,14 +1,18 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:garagem/theme/theme_screen.dart';
 import 'package:garagem/models/service_model.dart';
 import 'package:garagem/services/maintenance_service.dart';
+import 'package:garagem/services/image_service.dart';
 import 'package:intl/intl.dart';
+import 'package:image_picker/image_picker.dart';
 
 class AddServiceScreen extends StatefulWidget {
   final int vehicleId;
+  final ServiceModel? service; // Para edição de serviço existente
 
-  const AddServiceScreen({Key? key, required this.vehicleId}) : super(key: key);
+  const AddServiceScreen({Key? key, required this.vehicleId, this.service}) : super(key: key);
 
   @override
   _AddServiceScreenState createState() => _AddServiceScreenState();
@@ -25,14 +29,47 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   final TextEditingController _partsStoreController = TextEditingController();
   final TextEditingController _partsWarrantyController = TextEditingController();
   final TextEditingController _partsCostController = TextEditingController();
-  List<String> _imagePaths = [];
+  
+  // Imagens locais sendo manipuladas
+  List<File> _selectedImages = [];
+  // URLs de imagens já carregadas (em caso de edição)
+  List<String> _uploadedImageUrls = [];
+  
+  final ImageService _imageService = ImageService();
+  final MaintenanceService _maintenanceService = MaintenanceService();
 
   DateTime _currentDateTime = DateTime.now();
   bool _isSubmitting = false;
+  bool _isUploadingImages = false;
   String? _errorMessage;
+  int? _serviceId; // ID do serviço em caso de edição
 
   // Regex para validação de data DD/MM/YYYY
   final RegExp _dateRegex = RegExp(r'^(\d{2})/(\d{2})/(\d{4})$');
+  
+  @override
+  void initState() {
+    super.initState();
+    // Se for edição, preencher os campos
+    if (widget.service != null) {
+      _serviceId = widget.service!.id;
+      _serviceController.text = widget.service!.serviceType;
+      _workshopController.text = widget.service!.workshop;
+      _mechanicController.text = widget.service!.mechanic ?? '';
+      _laborWarrantyController.text = widget.service!.laborWarrantyDate ?? '';
+      _laborCostController.text = widget.service!.laborCost != null ? widget.service!.laborCost.toString() : '';
+      _partsController.text = widget.service!.parts ?? '';
+      _partsStoreController.text = widget.service!.partsStore ?? '';
+      _partsWarrantyController.text = widget.service!.partsWarrantyDate ?? '';
+      _partsCostController.text = widget.service!.partsCost != null ? widget.service!.partsCost.toString() : '';
+      _currentDateTime = widget.service!.dateTime;
+      
+      // Adicionar imagens já existentes
+      if (widget.service!.imagePaths.isNotEmpty) {
+        _uploadedImageUrls = List.from(widget.service!.imagePaths);
+      }
+    }
+  }
   
   @override
   void dispose() {
@@ -84,8 +121,95 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       return null;
     }
   }
+  
+  // Selecionar imagem da galeria ou câmera
+  Future<void> _selectImage() async {
+    if (_selectedImages.length + _uploadedImageUrls.length >= 4) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Máximo de 4 imagens permitido'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
 
-   Future<void> _submitService() async {
+    try {
+      final imageSource = await showModalBottomSheet<ImageSource>(
+        context: context,
+        builder: (BuildContext context) {
+          return SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                ListTile(
+                  leading: const Icon(Icons.photo_library),
+                  title: const Text('Galeria'),
+                  onTap: () => Navigator.pop(context, ImageSource.gallery),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.photo_camera),
+                  title: const Text('Câmera'),
+                  onTap: () => Navigator.pop(context, ImageSource.camera),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+
+      if (imageSource == null) return;
+
+      // Selecionar imagem
+      File? imageFile;
+      if (imageSource == ImageSource.gallery) {
+        imageFile = await _imageService.pickImageFromGallery();
+      } else {
+        imageFile = await _imageService.pickImageFromCamera();
+      }
+
+      if (imageFile == null) return;
+
+      // Processar imagem (comprimir se necessário)
+      setState(() {
+        _selectedImages.add(imageFile!); // Adicionamos ! para garantir não-nulidade
+      });
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Imagem adicionada com sucesso'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 1),
+        ),
+      );
+    } catch (e) {
+      print('Erro ao selecionar imagem: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erro ao processar imagem: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+  
+  // Remover imagem
+  void _removeImage(int index) {
+    setState(() {
+      if (index < _selectedImages.length) {
+        _selectedImages.removeAt(index);
+      } else {
+        // Se for uma imagem já enviada, remove da lista de URLs
+        final urlIndex = index - _selectedImages.length;
+        if (urlIndex >= 0 && urlIndex < _uploadedImageUrls.length) {
+          _uploadedImageUrls.removeAt(urlIndex);
+        }
+      }
+    });
+  }
+
+  // Fazer upload de imagens e salvar serviço
+  Future<void> _submitService() async {
     if (!_formKey.currentState!.validate()) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -102,8 +226,63 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     });
 
     try {
-      // Criar o objeto de serviço
+      // Lista de URLs das imagens (já existentes + novas)
+      List<String> allImageUrls = List.from(_uploadedImageUrls);
+      
+      // Se não houver serviço criado ainda, enviar serviço primeiro sem imagens
+      if (_serviceId == null && _selectedImages.isNotEmpty) {
+        // Criar objeto de serviço sem imagens
+        final initialService = ServiceModel(
+          vehicleId: widget.vehicleId,
+          serviceType: _serviceController.text.trim(),
+          workshop: _workshopController.text.trim(),
+          mechanic: _mechanicController.text.trim(),
+          laborWarrantyDate: _laborWarrantyController.text.trim(),
+          laborCost: _parseMoneyValue(_laborCostController.text),
+          parts: _partsController.text.trim(),
+          partsStore: _partsStoreController.text.trim(),
+          partsWarrantyDate: _partsWarrantyController.text.trim(),
+          partsCost: _parseMoneyValue(_partsCostController.text),
+          dateTime: _currentDateTime,
+          imagePaths: [],  // Inicialmente sem imagens
+        );
+
+        // Salvar serviço
+        final savedService = await _maintenanceService.addMaintenance(initialService);
+        _serviceId = savedService.id; // Armazenar ID para upload de imagens
+      }
+
+      // Fazer upload das imagens selecionadas, se houver
+      if (_selectedImages.isNotEmpty) {
+        setState(() {
+          _isUploadingImages = true;
+        });
+        
+        for (var imageFile in _selectedImages) {
+          try {
+            if (_serviceId != null) {
+              // Atualizar para usar um método existente em ImageService
+              // Por exemplo, substituindo uploadImageMultipart por uploadImage
+              final result = await _imageService.uploadImage(_serviceId!, imageFile);
+              if (result.containsKey('image') && result['image']['url'] != null) {
+                allImageUrls.add(result['image']['url']);
+              }
+            }
+            // Se _serviceId for null, não deveria chegar aqui, pois já criamos acima
+          } catch (e) {
+            print('Erro no upload da imagem: $e');
+            // Continue com as outras imagens mesmo se uma falhar
+          }
+        }
+        
+        setState(() {
+          _isUploadingImages = false;
+        });
+      }
+
+      // Atualizar ou criar o serviço com todas as URLs de imagens
       final service = ServiceModel(
+        id: _serviceId,
         vehicleId: widget.vehicleId,
         serviceType: _serviceController.text.trim(),
         workshop: _workshopController.text.trim(),
@@ -115,17 +294,20 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         partsWarrantyDate: _partsWarrantyController.text.trim(),
         partsCost: _parseMoneyValue(_partsCostController.text),
         dateTime: _currentDateTime,
-        imagePaths: List.from(_imagePaths),
+        imagePaths: allImageUrls,
       );
 
-      // Salvar no banco de dados
-      final savedService = await MaintenanceService().addMaintenance(service);
+      // Se já criamos anteriormente (para obter ID), então atualizamos
+      final savedService = _serviceId != null 
+          ? await _maintenanceService.updateMaintenance(service)
+          : await _maintenanceService.addMaintenance(service);
 
-      // Verificar se o widget ainda está montado
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Serviço registrado com sucesso!'),
+          SnackBar(
+            content: Text(_serviceId == null 
+              ? 'Serviço registrado com sucesso!' 
+              : 'Serviço atualizado com sucesso!'),
             backgroundColor: AppTheme.successColor,
           ),
         );
@@ -133,10 +315,9 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         Navigator.pop(context, savedService);
       }
     } catch (e) {
-      // Verificar se o widget ainda está montado
       if (mounted) {
         setState(() {
-          _errorMessage = 'Erro ao registrar serviço: ${e.toString()}';
+          _errorMessage = 'Erro: ${e.toString()}';
           _isSubmitting = false;
         });
         ScaffoldMessenger.of(context).showSnackBar(
@@ -146,6 +327,13 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           ),
         );
       }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+          _isUploadingImages = false;
+        });
+      }
     }
   }
 
@@ -154,7 +342,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     return Scaffold(
       backgroundColor: AppTheme.backgroundColor,
       appBar: AppBar(
-        title: const Text('Registrar Serviço'),
+        title: Text(_serviceId == null ? 'Registrar Serviço' : 'Editar Serviço'),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -233,18 +421,25 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                   ),
                 const SizedBox(height: 32),
                 ElevatedButton(
-                  onPressed: _isSubmitting ? null : _submitService,
+                  onPressed: (_isSubmitting || _isUploadingImages) ? null : _submitService,
                   style: AppTheme.primaryButtonStyle,
-                  child: _isSubmitting
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                          ),
+                  child: _isSubmitting || _isUploadingImages
+                      ? Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Text(_isUploadingImages ? 'ENVIANDO IMAGENS...' : 'REGISTRANDO...'),
+                          ],
                         )
-                      : const Text('REGISTRAR SERVIÇO'),
+                      : Text(_serviceId == null ? 'REGISTRAR SERVIÇO' : 'SALVAR ALTERAÇÕES'),
                 ),
               ],
             ),
@@ -254,10 +449,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     );
   }
 
-  // O resto dos widgets de construção do formulário permanece o mesmo...
-  // Métodos _buildDateTimeField(), _buildRequiredField(), _buildOptionalTextField(), etc.
-  // (mantendo os mesmos da versão anterior)
-  
   Widget _buildDateTimeField() {
     final formattedDate = DateFormat('dd/MM/yyyy HH:mm').format(_currentDateTime);
     
@@ -342,8 +533,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         label, 
         hintText: hintText,
       ).copyWith(
-        // Substituir prefixText por uma solução mais compatível
-        prefix: const Text('R\$ ', style: TextStyle(fontSize: 16)),
+        prefixText: 'R\$ ', // Usa copyWith para adicionar prefixText à decoração retornada
       ),
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
       validator: (value) {
@@ -362,6 +552,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }
 
   Widget _buildImageUpload() {
+    final int totalImages = _selectedImages.length + _uploadedImageUrls.length;
+    
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -370,7 +562,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             Text('Imagens (opcional)', style: AppTheme.bodyMedium),
             const SizedBox(width: 8),
             Text(
-              '${_imagePaths.length}/4',
+              '$totalImages/4',
               style: TextStyle(
                 color: AppTheme.textColorLight,
                 fontSize: 12,
@@ -392,12 +584,20 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           spacing: 8,
           runSpacing: 8,
           children: [
-            ..._imagePaths.map((path) => _buildImageThumbnail(path)),
-            if (_imagePaths.length < 4)
+            // Mostrar imagens temporárias selecionadas
+            ..._selectedImages.asMap().entries.map((entry) => 
+              _buildLocalImageThumbnail(entry.value, entry.key)
+            ),
+            
+            // Mostrar URLs de imagens já carregadas
+            ..._uploadedImageUrls.asMap().entries.map((entry) => 
+              _buildUrlImageThumbnail(entry.value, entry.key + _selectedImages.length)
+            ),
+            
+            // Botão para adicionar mais imagens
+            if (totalImages < 4)
               GestureDetector(
-                onTap: () {
-                  _selectImage();
-                },
+                onTap: _selectImage,
                 child: Container(
                   width: 80,
                   height: 80,
@@ -431,17 +631,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     );
   }
 
-  void _selectImage() {
-    // Implementação básica para teste
-    if (_imagePaths.length < 4) {
-      setState(() {
-        // No futuro, isso seria o URL da imagem no servidor
-        _imagePaths.add('https://via.placeholder.com/150');
-      });
-    }
-  }
-
-  Widget _buildImageThumbnail(String path) {
+  Widget _buildLocalImageThumbnail(File imageFile, int index) {
     return Stack(
       children: [
         Container(
@@ -449,32 +639,107 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           height: 80,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
-            color: AppTheme.primaryColorLight.withOpacity(0.2),
+            border: Border.all(
+              color: AppTheme.primaryColorLight,
+              width: 1,
+            ),
+            image: DecorationImage(
+              image: FileImage(imageFile),
+              fit: BoxFit.cover,
+            ),
+          ),
+        ),
+        Positioned(
+          top: 2,
+          right: 2,
+          child: GestureDetector(
+            onTap: () => _removeImage(index),
+            child: Container(
+              padding: const EdgeInsets.all(2),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.red,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.3),
+                    spreadRadius: 1,
+                    blurRadius: 2,
+                    offset: const Offset(0, 1),
+                  ),
+                ],
+              ),
+              child: const Icon(Icons.close, color: Colors.white, size: 16),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildUrlImageThumbnail(String imageUrl, int index) {
+    // Converter URL relativa para absoluta se necessário
+    String fullUrl = imageUrl;
+    if (imageUrl.startsWith('/uploads/')) {
+      fullUrl = 'http://127.0.0.1:5000$imageUrl'; // Ajuste para ambiente de desenvolvimento
+    }
+    
+    return Stack(
+      children: [
+        Container(
+          width: 80,
+          height: 80,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: AppTheme.primaryColorLight,
               width: 1,
             ),
           ),
-          child: const Icon(
-            Icons.image,
-            size: 40,
-            color: AppTheme.primaryColorLight,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Image.network(
+              fullUrl,
+              fit: BoxFit.cover,
+              loadingBuilder: (context, child, loadingProgress) {
+                if (loadingProgress == null) return child;
+                return Center(
+                  child: CircularProgressIndicator(
+                    value: loadingProgress.expectedTotalBytes != null
+                        ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                        : null,
+                  ),
+                );
+              },
+              errorBuilder: (context, error, stackTrace) {
+                return Container(
+                  color: Colors.grey[200],
+                  child: const Icon(
+                    Icons.broken_image,
+                    color: Colors.grey,
+                  ),
+                );
+              },
+            ),
           ),
         ),
         Positioned(
-          top: 4,
-          right: 4,
+          top: 2,
+          right: 2,
           child: GestureDetector(
-            onTap: () {
-              setState(() {
-                _imagePaths.remove(path);
-              });
-            },
+            onTap: () => _removeImage(index),
             child: Container(
               padding: const EdgeInsets.all(2),
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: Colors.red,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.3),
+                    spreadRadius: 1,
+                    blurRadius: 2,
+                    offset: const Offset(0, 1),
+                  ),
+                ],
               ),
               child: const Icon(Icons.close, color: Colors.white, size: 16),
             ),

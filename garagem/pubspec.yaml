@@ -10,9 +10,14 @@ dependencies:
     sdk: flutter  
   cupertino_icons: ^1.0.2
   http: ^0.13.5  # ou a versão mais recente
-  shared_preferences: ^2.2.13  # ou a versão mais recente
+  shared_preferences: ^2.0.15  # ou a versão mais recente
   intl: ^0.17.0
   mask_text_input_formatter: ^2.3.0
+  image_picker: ^0.8.7  # Para selecionar imagens da galeria/câmera
+  http_parser: ^4.0.2  # Para upload de arquivos
+  path: ^1.8.3  # Para manipulação de caminhos
+  flutter_image_compress: ^1.1.3  # Para comprimir imagens
+  path_provider: ^2.0.15  # Para acessar diretórios do dispositivo
 
 dev_dependencies:
   flutter_test:
