@@ -66,23 +66,24 @@ class MaintenanceService {
         throw Exception('Usuário não autenticado');
       }
 
-      // Preparar os dados para envio, garantindo que nulos sejam tratados corretamente
+      // Data preparation remains largely the same.
+      // 'images' will now contain Firebase Storage URLs.
       final Map<String, dynamic> data = {
         'vehicle_id': service.vehicleId,
         'service_type': service.serviceType,
         'workshop': service.workshop,
         'mechanic': service.mechanic ?? '',
         'labor_warranty_date': service.laborWarrantyDate ?? '',
-        'labor_cost': service.laborCost,  // Enviar como número, não como string
+        'labor_cost': service.laborCost,
         'parts': service.parts ?? '',
         'parts_store': service.partsStore ?? '',
         'parts_warranty_date': service.partsWarrantyDate ?? '',
-        'parts_cost': service.partsCost,  // Enviar como número, não como string
+        'parts_cost': service.partsCost,
         'service_date': DateFormat('yyyy-MM-dd HH:mm:ss').format(service.dateTime),
-        'images': service.imagePaths ?? [],
+        'images': service.imagePaths, // This now contains URLs
       };
 
-      print('Enviando dados para API: $data');
+      print('Enviando dados para API (com URLs): $data'); // Log updated data
 
       final response = await http.post(
         Uri.parse('$baseUrl/maintenances/add'),
@@ -99,6 +100,7 @@ class MaintenanceService {
       if (response.statusCode == 201) {
         final responseData = jsonDecode(response.body);
         final maintenanceData = responseData['maintenance'];
+        // Parsing the response remains the same
         return ServiceModel(
           id: maintenanceData['id'],
           vehicleId: maintenanceData['vehicle_id'],
@@ -106,17 +108,17 @@ class MaintenanceService {
           workshop: maintenanceData['workshop'],
           mechanic: maintenanceData['mechanic'],
           laborWarrantyDate: maintenanceData['labor_warranty_date'],
-          laborCost: maintenanceData['labor_cost'] != null 
-              ? double.parse(maintenanceData['labor_cost'].toString()) 
+          laborCost: maintenanceData['labor_cost'] != null
+              ? double.parse(maintenanceData['labor_cost'].toString())
               : null,
           parts: maintenanceData['parts'],
           partsStore: maintenanceData['parts_store'],
           partsWarrantyDate: maintenanceData['parts_warranty_date'],
-          partsCost: maintenanceData['parts_cost'] != null 
-              ? double.parse(maintenanceData['parts_cost'].toString()) 
+          partsCost: maintenanceData['parts_cost'] != null
+              ? double.parse(maintenanceData['parts_cost'].toString())
               : null,
           dateTime: DateTime.parse(maintenanceData['service_date']),
-          imagePaths: List<String>.from(maintenanceData['images'] ?? []),
+          imagePaths: List<String>.from(maintenanceData['images'] ?? []), // Expecting URLs back
         );
       } else {
         final responseData = jsonDecode(response.body);

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "817710784140",
+    "project_id": "garagem60storage",
+    "storage_bucket": "garagem60storage.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:817710784140:android:6d9b063b37f39e295ea5a9",
+        "android_client_info": {
+          "package_name": "com.example.garagem"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBw3cnt-1QLmKYKLBCk0_zOVWC0bE6ilqI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
