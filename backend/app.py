@@ -8,6 +8,10 @@ from models import User, Vehicle, Maintenance, MaintenanceImage
 import firebase_admin
 from firebase_admin import credentials, auth
 
+# --- Corrija o nome do bucket removendo o prefixo 'gs://' ---
+FIREBASE_STORAGE_BUCKET = 'garagem60storage.firebasestorage.app' # REMOVA o 'gs://'
+# -------------------------------------------------------------
+
 def create_app():
     app = Flask(__name__)
 
@@ -23,8 +27,11 @@ def create_app():
         # Caminho para o arquivo da chave de serviço
         cred_path = os.path.join(os.path.dirname(__file__), 'firebase-service-account.json')
         cred = credentials.Certificate(cred_path)
-        firebase_admin.initialize_app(cred)
-        print("Firebase Admin SDK inicializado com sucesso.")
+        # A inicialização agora usará o nome correto do bucket
+        firebase_admin.initialize_app(cred, {
+            'storageBucket': FIREBASE_STORAGE_BUCKET
+        })
+        print(f"Firebase Admin SDK inicializado com sucesso. Bucket: {FIREBASE_STORAGE_BUCKET}")
     except Exception as e:
         print(f"Erro ao inicializar Firebase Admin SDK: {e}")
 
@@ -43,7 +50,7 @@ def create_app():
     # Criação das tabelas
     with app.app_context():
         db.create_all()
-        print("Banco de dados criado/recriado com sucesso!")
+        print("Tabelas do banco de dados verificadas/criadas.")
 
     return app
 

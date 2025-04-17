@@ -3,8 +3,79 @@ from extensions import db
 from models import Maintenance, MaintenanceImage, Vehicle, User
 from datetime import datetime
 from .auth_routes import firebase_token_required
+from firebase_admin import storage # Importar storage
+import urllib.parse # Para decodificar URL
+import logging # Para logs
+import traceback # Para logar stack trace completo
 
 maintenance_bp = Blueprint('maintenance', __name__)
+logger = logging.getLogger(__name__) # Configurar logger
+
+# --- Função Auxiliar para Extrair Caminho do Storage ---
+def get_storage_path_from_url(image_url):
+    """Extrai o caminho do arquivo no Firebase Storage a partir da URL de download."""
+    logger.debug(f"Tentando extrair caminho da URL: {image_url}")
+    try:
+        decoded_url = urllib.parse.unquote(image_url)
+        logger.debug(f"URL decodificada: {decoded_url}")
+        # Tenta encontrar /o/ que marca o início do caminho do objeto no bucket
+        path_start_marker = '/o/'
+        path_start_index = decoded_url.find(path_start_marker)
+
+        if path_start_index == -1:
+            logger.warning(f"Marcador '/o/' não encontrado na URL decodificada: {decoded_url}")
+            return None
+
+        path_start = path_start_index + len(path_start_marker)
+
+        # Tenta encontrar ?alt=media que marca o fim do caminho
+        path_end_marker = '?alt=media'
+        path_end_index = decoded_url.find(path_end_marker, path_start) # Busca a partir do início do caminho
+
+        if path_end_index == -1:
+            logger.warning(f"Marcador '?alt=media' não encontrado após o caminho na URL: {decoded_url}")
+            # Considerar que talvez a URL não tenha query parameters? Pouco provável para downloadURL.
+            # Se a URL for apenas o caminho, isso pode falhar. Ajustar se necessário.
+            # Por enquanto, retorna None se não encontrar o fim esperado.
+            return None
+
+        extracted_path = decoded_url[path_start:path_end_index]
+        logger.info(f"Caminho extraído do Storage: {extracted_path}")
+        return extracted_path
+
+    except Exception as e:
+        logger.error(f"Erro EXCEPCIONAL ao extrair caminho da URL {image_url}: {e}")
+        logger.error(traceback.format_exc()) # Log completo do erro
+        return None
+
+# --- Função Auxiliar para Deletar Imagem do Storage ---
+def delete_image_from_storage(image_url):
+    """Deleta uma imagem do Firebase Storage usando sua URL."""
+    file_path = get_storage_path_from_url(image_url)
+    if file_path:
+        try:
+            bucket = storage.bucket() # Obtém o bucket padrão (verifique se é o correto no Firebase Console)
+            logger.info(f"Tentando deletar blob: '{file_path}' do bucket: '{bucket.name}'")
+            blob = bucket.blob(file_path)
+            blob.delete() # A exclusão em si
+            logger.info(f"Blob deletado do Storage com sucesso: {file_path}")
+            return True
+        except Exception as e:
+            # Log detalhado da exceção
+            logger.error(f"Falha ao deletar blob '{file_path}' do Storage: {type(e).__name__} - {e}")
+            # Verifica se o erro é 'NotFound' (código 404 geralmente)
+            # A API Python pode levantar google.cloud.exceptions.NotFound
+            from google.cloud.exceptions import NotFound
+            if isinstance(e, NotFound):
+                 logger.warning(f"Blob não encontrado no Storage (pode já ter sido deletado): {file_path}")
+                 return True # Considerar sucesso se não encontrada
+            else:
+                 # Logar o stack trace para outros erros
+                 logger.error(traceback.format_exc())
+                 return False # Falha na exclusão por outro motivo
+    else:
+        logger.error(f"Não foi possível obter o caminho do arquivo para deletar a URL: {image_url}")
+        return False # Falha na extração do caminho
 
 @maintenance_bp.route('/vehicle/<int:vehicle_id>', methods=['GET'])
 @firebase_token_required
@@ -119,15 +190,35 @@ def delete_maintenance(firebase_uid, maintenance_id):
 
     vehicle = Vehicle.query.filter_by(id=maintenance.vehicle_id, user_id=user.id).first()
     if not vehicle:
-        return jsonify({'message': 'Veículo não pertence a este usuário'}), 403
+        # Alterado para 403 Forbidden, pois a manutenção existe mas não pertence ao usuário
+        return jsonify({'message': 'Manutenção não pertence a um veículo deste usuário'}), 403
+
+    # --- Início: Lógica de exclusão de imagens ---
+    image_urls_to_delete = [img.image_url for img in maintenance.images]
+    logger.info(f"Iniciando exclusão de {len(image_urls_to_delete)} imagens do Storage para manutenção ID {maintenance_id}")
+    storage_deletion_failed = False
+    for url in image_urls_to_delete:
+        logger.debug(f"Processando URL para exclusão: {url}")
+        if not delete_image_from_storage(url):
+            storage_deletion_failed = True # Marca se alguma exclusão falhar
+    # --- Fim: Lógica de exclusão de imagens ---
+
+    # Prosseguir com a exclusão do banco de dados mesmo se a exclusão do storage falhar?
+    # Decisão: Sim, mas logar o erro. A referência no DB será removida.
+    if storage_deletion_failed:
+        logger.warning(f"Falha ao deletar uma ou mais imagens do Storage para a manutenção ID {maintenance_id}. Verifique os logs.")
 
     try:
+        # Excluir a manutenção (cascade removerá MaintenanceImage do DB)
         db.session.delete(maintenance)
         db.session.commit()
+        logger.info(f"Manutenção ID {maintenance_id} excluída do DB com sucesso.")
         return jsonify({'message': 'Manutenção excluída com sucesso'}), 200
     except Exception as e:
         db.session.rollback()
-        return jsonify({'message': f'Erro ao excluir manutenção: {str(e)}'}), 500
+        logger.error(f"Erro ao excluir manutenção ID {maintenance_id} do DB: {e}")
+        logger.error(traceback.format_exc()) # Log completo do erro de DB
+        return jsonify({'message': f'Erro ao excluir manutenção do banco de dados: {str(e)}'}), 500
 
 @maintenance_bp.route('/<int:maintenance_id>', methods=['GET'])
 @firebase_token_required

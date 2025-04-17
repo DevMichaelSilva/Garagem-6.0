@@ -4,9 +4,12 @@ from models import Vehicle, User, Maintenance, MaintenanceImage
 from datetime import datetime
 import logging
 from .auth_routes import firebase_token_required
+# Importar funções auxiliares de maintenance_routes (ou duplicá-las se preferir isolamento)
+from .maintenance_routes import delete_image_from_storage
+import traceback # Para logar stack trace completo
 
 # Configurar logging
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO) # Ajuste o nível conforme necessário
 logger = logging.getLogger(__name__)
 
 vehicle_bp = Blueprint('vehicle', __name__)
@@ -113,28 +116,50 @@ def delete_vehicle(firebase_uid, vehicle_id):
         return jsonify({'message': 'Usuário local não encontrado'}), 404
 
     try:
-        # Buscar o veículo
         vehicle = Vehicle.query.get(vehicle_id)
         if not vehicle:
             return jsonify({'message': 'Veículo não encontrado'}), 404
-        
-        # Verificar se o veículo pertence ao usuário
+
         if vehicle.user_id != user.id:
             return jsonify({'message': 'Este veículo não pertence ao usuário atual'}), 403
-        
-        # Excluir todas as manutenções relacionadas (as imagens são excluídas em cascata)
-        maintenances = Maintenance.query.filter_by(vehicle_id=vehicle_id).all()
-        for maintenance in maintenances:
-            db.session.delete(maintenance)
-        
-        # Excluir o veículo
+
+        # --- Início: Coletar URLs das imagens ANTES de deletar ---
+        all_image_urls_to_delete = []
+        logger.info(f"Coletando URLs de imagens para exclusão do veículo ID {vehicle_id}...")
+        for maintenance in vehicle.maintenances:
+            logger.debug(f"  - Verificando manutenção ID {maintenance.id}")
+            for image in maintenance.images:
+                all_image_urls_to_delete.append(image.image_url)
+                logger.debug(f"    - Coletada URL: {image.image_url}")
+        logger.info(f"Total de {len(all_image_urls_to_delete)} URLs coletadas para o veículo ID {vehicle_id}.")
+        # --- Fim: Coletar URLs ---
+
+        # Excluir o veículo do banco de dados
+        # O cascade='all, delete-orphan' removerá as manutenções e MaintenanceImages associadas
         db.session.delete(vehicle)
         db.session.commit()
-        
-        logger.info(f"Veículo ID {vehicle_id} excluído com sucesso pelo usuário UID {firebase_uid}")
-        return jsonify({'message': 'Veículo excluído com sucesso'}), 200
-    
+        logger.info(f"Veículo ID {vehicle_id} e dados associados excluídos do DB com sucesso.")
+
+        # --- Início: Deletar imagens do Storage APÓS commit do DB ---
+        storage_deletion_failed_count = 0
+        if all_image_urls_to_delete:
+            logger.info(f"Iniciando exclusão de {len(all_image_urls_to_delete)} imagens do Storage para veículo ID {vehicle_id}...")
+            for url in all_image_urls_to_delete:
+                logger.debug(f"  - Processando URL para exclusão do Storage: {url}")
+                if not delete_image_from_storage(url):
+                    storage_deletion_failed_count += 1
+            if storage_deletion_failed_count > 0:
+                 logger.warning(f"{storage_deletion_failed_count} falha(s) ao deletar imagens do Storage para o veículo ID {vehicle_id}. Verifique logs anteriores.")
+            else:
+                 logger.info(f"Todas as {len(all_image_urls_to_delete)} imagens associadas ao veículo ID {vehicle_id} foram processadas para exclusão do Storage.")
+        else:
+            logger.info(f"Nenhuma imagem associada encontrada no DB para exclusão do Storage para o veículo ID {vehicle_id}.")
+        # --- Fim: Deletar imagens do Storage ---
+
+        return jsonify({'message': 'Veículo e dados associados excluídos com sucesso'}), 200
+
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Erro ao excluir veículo: {str(e)}")
-        return jsonify({'message': f'Erro ao excluir veículo: {str(e)}'}), 500
+        logger.error(f"Erro GERAL ao excluir veículo ID {vehicle_id}: {str(e)}")
+        logger.error(traceback.format_exc()) # Log completo do erro
+        return jsonify({'message': f'Erro interno ao excluir veículo: {str(e)}'}), 500
