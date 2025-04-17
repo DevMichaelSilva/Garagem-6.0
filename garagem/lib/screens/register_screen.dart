@@ -62,14 +62,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
         _emailController.text.trim(),
         _passwordController.text,
         cpfFormatter.getUnmaskedText(),
-      phoneFormatter.getUnmaskedText(),
-      _confirmPasswordController.text,
+        phoneFormatter.getUnmaskedText(),
       );
       
+      if (!mounted) return;
+
       if (result['success']) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Registro realizado com sucesso!'),
+          const SnackBar(
+            content: Text('Registro realizado com sucesso! Faça o login.'),
             backgroundColor: AppTheme.successColor,
           ),
         );
@@ -82,13 +83,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
         });
       }
     } catch (e) {
-      setState(() {
-        _errorMessage = 'Erro de conexão. Tente novamente mais tarde.';
-      });
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Ocorreu um erro inesperado. Tente novamente.';
+        });
+      }
+      print("Register Error (catch): $e");
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
   

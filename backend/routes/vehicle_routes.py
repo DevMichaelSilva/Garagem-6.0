@@ -1,10 +1,9 @@
 from flask import Blueprint, request, jsonify, current_app
 from extensions import db
 from models import Vehicle, User, Maintenance, MaintenanceImage
-import jwt
-from functools import wraps
 from datetime import datetime
 import logging
+from .auth_routes import firebase_token_required
 
 # Configurar logging
 logging.basicConfig(level=logging.DEBUG)
@@ -12,32 +11,14 @@ logger = logging.getLogger(__name__)
 
 vehicle_bp = Blueprint('vehicle', __name__)
 
-# Middleware para verificação do token
-def token_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        token = request.headers.get('Authorization')
-        if not token:
-            return jsonify({'message': 'Token não fornecido'}), 401
-        
-        try:
-            token = token.split(" ")[1] if len(token.split(" ")) > 1 else token
-            data = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=["HS256"])
-            current_user = User.query.get(data['user_id'])
-            if not current_user:
-                return jsonify({'message': 'Usuário não encontrado'}), 401
-        except Exception as e:
-            logger.error(f"Erro na autenticação: {str(e)}")
-            return jsonify({'message': f'Token inválido: {str(e)}'}), 401
-            
-        return f(current_user, *args, **kwargs)
-    
-    return decorated
-
 @vehicle_bp.route('/', methods=['GET'])
-@token_required
-def get_vehicles(current_user):
-    vehicles = Vehicle.query.filter_by(user_id=current_user.id).all()
+@firebase_token_required
+def get_vehicles(firebase_uid):
+    user = User.query.filter_by(firebase_uid=firebase_uid).first()
+    if not user:
+        return jsonify({'message': 'Usuário local não encontrado para o token fornecido'}), 404
+
+    vehicles = Vehicle.query.filter_by(user_id=user.id).all()
     
     output = []
     for vehicle in vehicles:
@@ -55,11 +36,15 @@ def get_vehicles(current_user):
     return jsonify({'vehicles': output}), 200
 
 @vehicle_bp.route('/<int:vehicle_id>', methods=['GET'])
-@token_required
-def get_vehicle(current_user, vehicle_id):
-    vehicle = Vehicle.query.filter_by(id=vehicle_id, user_id=current_user.id).first()
+@firebase_token_required
+def get_vehicle(firebase_uid, vehicle_id):
+    user = User.query.filter_by(firebase_uid=firebase_uid).first()
+    if not user:
+        return jsonify({'message': 'Usuário local não encontrado'}), 404
+
+    vehicle = Vehicle.query.filter_by(id=vehicle_id, user_id=user.id).first()
     if not vehicle:
-        return jsonify({'message': 'Veículo não encontrado'}), 404
+        return jsonify({'message': 'Veículo não encontrado ou não pertence a este usuário'}), 404
 
     vehicle_data = {
         'id': vehicle.id,
@@ -72,11 +57,14 @@ def get_vehicle(current_user, vehicle_id):
     }
 
     return jsonify(vehicle_data), 200
-# Adicionar ao arquivo routes/vehicle_routes.py
 
 @vehicle_bp.route('/', methods=['POST'])
-@token_required
-def add_vehicle(current_user):
+@firebase_token_required
+def add_vehicle(firebase_uid):
+    user = User.query.filter_by(firebase_uid=firebase_uid).first()
+    if not user:
+        return jsonify({'message': 'Usuário local não encontrado'}), 404
+
     data = request.get_json()
     
     # Verifica se os campos obrigatórios estão presentes
@@ -92,7 +80,7 @@ def add_vehicle(current_user):
     
     # Cria o novo veículo
     new_vehicle = Vehicle(
-        user_id=current_user.id,
+        user_id=user.id,
         type=data['type'],
         brand=data['brand'],
         model=data['model'],
@@ -118,12 +106,12 @@ def add_vehicle(current_user):
     }), 201
 
 @vehicle_bp.route('/<int:vehicle_id>', methods=['DELETE'])
-@token_required
-def delete_vehicle(current_user, vehicle_id):
-    """
-    Exclui um veículo específico.
-    Verifica se o veículo pertence ao usuário atual.
-    """
+@firebase_token_required
+def delete_vehicle(firebase_uid, vehicle_id):
+    user = User.query.filter_by(firebase_uid=firebase_uid).first()
+    if not user:
+        return jsonify({'message': 'Usuário local não encontrado'}), 404
+
     try:
         # Buscar o veículo
         vehicle = Vehicle.query.get(vehicle_id)
@@ -131,7 +119,7 @@ def delete_vehicle(current_user, vehicle_id):
             return jsonify({'message': 'Veículo não encontrado'}), 404
         
         # Verificar se o veículo pertence ao usuário
-        if vehicle.user_id != current_user.id:
+        if vehicle.user_id != user.id:
             return jsonify({'message': 'Este veículo não pertence ao usuário atual'}), 403
         
         # Excluir todas as manutenções relacionadas (as imagens são excluídas em cascata)
@@ -143,12 +131,10 @@ def delete_vehicle(current_user, vehicle_id):
         db.session.delete(vehicle)
         db.session.commit()
         
-        logger.info(f"Veículo ID {vehicle_id} excluído com sucesso pelo usuário ID {current_user.id}")
+        logger.info(f"Veículo ID {vehicle_id} excluído com sucesso pelo usuário UID {firebase_uid}")
         return jsonify({'message': 'Veículo excluído com sucesso'}), 200
     
     except Exception as e:
         db.session.rollback()
         logger.error(f"Erro ao excluir veículo: {str(e)}")
         return jsonify({'message': f'Erro ao excluir veículo: {str(e)}'}), 500
-
-# Endpoint para adicionar veículo e outras operações serão implementados em uma versão futura

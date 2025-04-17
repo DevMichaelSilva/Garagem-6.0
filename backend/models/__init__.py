@@ -3,13 +3,15 @@ from datetime import datetime
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
+    firebase_uid = db.Column(db.String(128), unique=True, nullable=False) # Adicionado
+    username = db.Column(db.String(80), nullable=False) # unique=True removido, pode haver nomes iguais
     email = db.Column(db.String(120), unique=True, nullable=False)
-    password_hash = db.Column(db.String(128))
-    cpf = db.Column(db.String(14), unique=True, nullable=False)
-    phone = db.Column(db.String(20))
+    # password_hash removido, Firebase Auth gerencia a senha
+    cpf = db.Column(db.String(14), unique=True, nullable=True) # Tornar opcional inicialmente
+    phone = db.Column(db.String(20), nullable=True) # Tornar opcional inicialmente
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
+    vehicles = db.relationship('Vehicle', backref='owner', lazy=True) # Adicionado relationship
+
     def __repr__(self):
         return f'<User {self.username}>'
 
@@ -23,7 +25,7 @@ class Vehicle(db.Model):
     license_plate = db.Column(db.String(15), nullable=False)
     color = db.Column(db.String(30))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    maintenances = db.relationship('Maintenance', backref='vehicle', lazy=True)
+    maintenances = db.relationship('Maintenance', backref='vehicle', lazy=True, cascade='all, delete-orphan')
 
 class Maintenance(db.Model):
     id = db.Column(db.Integer, primary_key=True)

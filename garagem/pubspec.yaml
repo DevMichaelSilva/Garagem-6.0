@@ -16,6 +16,7 @@ dependencies:
   image_picker: ^1.0.7 # Add image_picker
   firebase_core: ^3.13.0 # Add firebase_core
   firebase_storage: ^12.4.5 # Add firebase_storage
+  firebase_auth: ^5.1.2 # Add firebase_auth (use a recent version)
 
 dev_dependencies:
   flutter_test:

@@ -26,42 +26,52 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-Future<void> _login() async {
-  if (!_formKey.currentState!.validate()) {
-    return;
-  }
-  
-  setState(() {
-    _isLoading = true;
-    _errorMessage = null;
-  });
-
-  try {
-    final result = await AuthService().login(
-      _emailController.text.trim(),
-      _passwordController.text,
-    );
-
-    if (result['success']) {
-      // Navegar para a tela principal após login bem-sucedido
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => const HomeScreen()),
-      );
-    } else {
-      setState(() {
-        _errorMessage = result['message'] ?? 'Erro ao fazer login';
-      });
+  Future<void> _login() async {
+    if (!_formKey.currentState!.validate()) {
+      return;
     }
-  } catch (e) {
+
     setState(() {
-      _errorMessage = 'Erro de conexão. Tente novamente mais tarde.';
+      _isLoading = true;
+      _errorMessage = null;
     });
-  } finally {
-    setState(() {
-      _isLoading = false;
-    });
+
+    try {
+      // Usa o novo método de login do AuthService (Firebase Auth)
+      final result = await AuthService().login(
+        _emailController.text.trim(),
+        _passwordController.text,
+      );
+
+      // Verifica se o widget ainda está montado antes de navegar
+      if (!mounted) return;
+
+      if (result['success']) {
+        // Navegar para a tela principal após login bem-sucedido
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (context) => const HomeScreen()),
+        );
+      } else {
+        setState(() {
+          _errorMessage = result['message'] ?? 'Erro ao fazer login';
+        });
+      }
+    } catch (e) { // Captura genérica para erros inesperados
+       if (mounted) {
+        setState(() {
+          _errorMessage = 'Ocorreu um erro inesperado. Tente novamente.';
+        });
+       }
+       print("Login Error (catch): $e");
+    } finally {
+      // Garante que o estado de loading seja resetado apenas se montado
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
   }
-}
 
   @override
   Widget build(BuildContext context) {

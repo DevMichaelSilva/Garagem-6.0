@@ -1,114 +1,123 @@
 from flask import Blueprint, request, jsonify, current_app
-from models import User  # Importando User do módulo models
-import jwt
-import datetime
+from models import User
 from extensions import db
-from werkzeug.security import generate_password_hash, check_password_hash
-import re
+# Remover imports não utilizados: jwt, datetime, generate_password_hash, check_password_hash, re
+from firebase_admin import auth # Importar auth do firebase_admin
+from functools import wraps # Importar wraps
 
 auth_bp = Blueprint('auth', __name__)
 
-@auth_bp.route('/register', methods=['POST'])
-def register():
-    data = request.get_json()
-    
-    # Verificar se todos os campos obrigatórios estão presentes
-    required_fields = ['username', 'email', 'password', 'cpf', 'phone', 'confirm_password']
-    for field in required_fields:
-        if field not in data:
-            return jsonify({"message": f"Campo '{field}' é obrigatório"}), 400
-    
-    # Verificar se as senhas coincidem
-    if data['password'] != data['confirm_password']:
-        return jsonify({"message": "As senhas não coincidem"}), 400
-    
-    # Verificar se o email já está em uso
-    if User.query.filter_by(email=data['email']).first():
-        return jsonify({"message": "Email já cadastrado"}), 400
-    
-    # Verificar se o nome de usuário já está em uso
-    if User.query.filter_by(username=data['username']).first():
-        return jsonify({"message": "Nome de usuário já em uso"}), 400
-    
-    # Verificar se o CPF já está cadastrado e se existe um atributo cpf no modelo
-    if hasattr(User, 'cpf') and User.query.filter_by(cpf=data['cpf']).first():
-        return jsonify({"message": "CPF já cadastrado"}), 400
-    
-    # Validar formato do email - Correção da expressão regular
-    email_pattern = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
-    if not re.match(email_pattern, data['email']):
-        return jsonify({"message": "Formato de email inválido"}), 400
-    
-    # Validar CPF (remover caracteres não numéricos)
-    cpf_digits = re.sub(r'[^0-9]', '', data['cpf'])
-    if len(cpf_digits) != 11:
-        return jsonify({"message": "CPF inválido"}), 400
-    
-    # Validar número de telefone
-    phone_digits = re.sub(r'[^0-9]', '', data['phone'])
-    if len(phone_digits) < 10:
-        return jsonify({"message": "Telefone inválido"}), 400
-    
-    # Criar novo usuário
+# Decorator para verificar o token Firebase ID
+def firebase_token_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        id_token = request.headers.get('Authorization')
+        if not id_token:
+            return jsonify({"message": "Token de autorização não fornecido"}), 401
+
+        # Remover 'Bearer ' se presente
+        if id_token.startswith('Bearer '):
+            id_token = id_token.split('Bearer ')[1]
+
+        try:
+            # Verificar o ID token usando o Firebase Admin SDK.
+            # Isso verifica a assinatura, expiração e aud (audience).
+            decoded_token = auth.verify_id_token(id_token)
+            firebase_uid = decoded_token['uid']
+
+            # Buscar ou criar usuário no banco de dados local
+            current_user = User.query.filter_by(firebase_uid=firebase_uid).first()
+
+            # Se o usuário não existe no DB local, mas o token é válido,
+            # podemos criá-lo aqui ou deixar a rota /sync_user fazer isso.
+            # Por segurança, vamos apenas passar o UID por enquanto.
+            # O endpoint protegido pode então buscar o usuário pelo UID.
+            # Ou podemos adicionar o usuário ao contexto da requisição (g)
+            # from flask import g
+            # g.current_user = current_user
+            # g.firebase_uid = firebase_uid
+
+        except auth.ExpiredIdTokenError:
+            return jsonify({"message": "Token expirado"}), 401
+        except auth.InvalidIdTokenError as e:
+            print(f"Token inválido: {e}")
+            return jsonify({"message": "Token inválido"}), 401
+        except Exception as e:
+            print(f"Erro na verificação do token: {e}")
+            return jsonify({"message": "Erro interno na verificação do token"}), 500
+
+        # Passa o firebase_uid para a função da rota
+        return f(firebase_uid, *args, **kwargs)
+    return decorated_function
+
+
+# Rota para sincronizar/criar usuário no backend após login/registro no Firebase
+@auth_bp.route('/sync_user', methods=['POST'])
+@firebase_token_required # Usa o novo decorator
+def sync_user(firebase_uid):
+    """
+    Chamado pelo frontend após login/registro bem-sucedido no Firebase.
+    Cria ou atualiza o usuário no banco de dados local.
+    """
     try:
-        # Verificar quais campos o modelo User suporta
-        user_fields = {
-            'username': data['username'],
-            'email': data['email'],
-            'password_hash': generate_password_hash(data['password'])
-        }
-        
-        # Adicionar campos opcionais se existirem no modelo
-        if hasattr(User, 'cpf'):
-            user_fields['cpf'] = cpf_digits
-        if hasattr(User, 'phone'):
-            user_fields['phone'] = phone_digits
-            
-        new_user = User(**user_fields)
-        
-        # Salvar usuário no banco de dados
-        db.session.add(new_user)
-        db.session.commit()
-        
-        return jsonify({
-            "message": "Usuário registrado com sucesso",
-            "user_id": new_user.id
-        }), 201
+        # Obter informações do usuário do Firebase Auth usando o UID
+        firebase_user = auth.get_user(firebase_uid)
+        email = firebase_user.email
+        name = firebase_user.display_name
+
+        # Verificar se o usuário já existe no banco de dados local
+        user = User.query.filter_by(firebase_uid=firebase_uid).first()
+
+        if not user:
+            # Se não existe, cria um novo usuário
+            # Tenta pegar dados adicionais do request (enviados pelo frontend após registro)
+            data = request.get_json()
+            cpf = data.get('cpf') if data else None
+            phone = data.get('phone') if data else None
+
+            user = User(
+                firebase_uid=firebase_uid,
+                email=email,
+                username=name or email, # Usa nome ou email como username padrão
+                cpf=cpf, # Salva CPF se fornecido
+                phone=phone # Salva telefone se fornecido
+            )
+            db.session.add(user)
+            db.session.commit()
+            print(f"Novo usuário criado no DB local: UID={firebase_uid}, Email={email}")
+            return jsonify({"message": "Usuário sincronizado com sucesso (novo)", "user_id": user.id}), 201
+        else:
+            # Se já existe, pode opcionalmente atualizar informações (nome, etc.)
+            updated = False
+            if user.username != name and name:
+                user.username = name
+                updated = True
+            # Poderia adicionar lógica para atualizar CPF/Telefone se eles estiverem vazios no DB
+            # e forem fornecidos na requisição (ex: primeiro login após registro)
+            data = request.get_json()
+            if data:
+                if not user.cpf and data.get('cpf'):
+                    user.cpf = data.get('cpf')
+                    updated = True
+                if not user.phone and data.get('phone'):
+                    user.phone = data.get('phone')
+                    updated = True
+
+            if updated:
+                db.session.commit()
+                print(f"Usuário atualizado no DB local: UID={firebase_uid}")
+
+            return jsonify({"message": "Usuário sincronizado com sucesso (existente)", "user_id": user.id}), 200
+
+    except auth.UserNotFoundError:
+        return jsonify({"message": "Usuário Firebase não encontrado"}), 404
     except Exception as e:
         db.session.rollback()
-        return jsonify({"message": f"Erro ao registrar usuário: {str(e)}"}), 500
+        print(f"Erro ao sincronizar usuário: {e}")
+        return jsonify({"message": f"Erro ao sincronizar usuário: {str(e)}"}), 500
 
-@auth_bp.route('/login', methods=['POST'])
-def login():
-    data = request.get_json()
-    
-    # Verificar se email e senha foram fornecidos
-    if 'email' not in data or 'password' not in data:
-        return jsonify({"message": "Email e senha são obrigatórios"}), 400
-    
-    # Buscar usuário pelo email
-    user = User.query.filter_by(email=data['email']).first()
-    
-    # Verificar se o usuário existe e a senha está correta
-    if not user or not check_password_hash(user.password_hash, data['password']):
-        return jsonify({"message": "Email ou senha inválidos"}), 401
-    
-    # Gera o token JWT
-    token = jwt.encode({
-        'user_id': user.id,
-        'exp': datetime.datetime.utcnow() + datetime.timedelta(days=1)
-    }, current_app.config['SECRET_KEY'], algorithm="HS256")
-    
-    return jsonify({
-        "message": "Login realizado com sucesso",
-        "token": token,
-        "user_id": user.id,
-        "username": user.username,
-        "email": user.email
-    }), 200
 
-@auth_bp.route('/verify', methods=['GET'])
-def verify_token():
-    # Lógica para verificar o token JWT
-    # Isso seria implementado quando você adicionar autenticação JWT
-    return jsonify({"message": "Token válido"}), 200
+# Remover rotas /register, /login e /verify
+# @auth_bp.route('/register', methods=['POST']) ... (REMOVIDO)
+# @auth_bp.route('/login', methods=['POST']) ... (REMOVIDO)
+# @auth_bp.route('/verify', methods=['GET']) ... (REMOVIDO)

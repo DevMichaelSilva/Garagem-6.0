@@ -41,21 +41,24 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
 
     _animationController.forward();
     
-    _navigateToLogin();
+    _checkLoginStatus(); // Renomeado para clareza
   }
 
-  _navigateToLogin() async {
-  await Future.delayed(const Duration(seconds: 3));
-  
-  // Verifica se o usuário está logado
-  bool isLoggedIn = await AuthService().isLoggedIn();
-  
-  Navigator.of(context).pushReplacement(
-    MaterialPageRoute(
-      builder: (context) => isLoggedIn ? const HomeScreen() : const LoginScreen(),
-    ),
-  );
-}
+  _checkLoginStatus() async {
+    await Future.delayed(const Duration(seconds: 3)); // Tempo da animação
+
+    // Verifica se o widget ainda está montado
+    if (!mounted) return;
+
+    // Verifica se o usuário está logado usando Firebase Auth
+    bool loggedIn = await AuthService().isLoggedIn();
+
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (context) => loggedIn ? const HomeScreen() : const LoginScreen(),
+      ),
+    );
+  }
 
   @override
   void dispose() {
