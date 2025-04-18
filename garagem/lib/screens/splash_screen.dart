@@ -95,7 +95,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                     ),
                     const SizedBox(height: 24),
                     Text(
-                      'GARAGEM',
+                      'GARAGEM 6.0',
                       style: TextStyle(
                         fontSize: 32,
                         fontWeight: FontWeight.bold,

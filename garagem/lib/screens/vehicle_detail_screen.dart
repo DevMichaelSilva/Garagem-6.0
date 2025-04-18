@@ -5,6 +5,7 @@ import 'package:garagem/services/maintenance_service.dart';
 import 'package:garagem/screens/add_service_screen.dart';
 import 'package:garagem/models/service_model.dart';
 import 'package:intl/intl.dart';
+import 'package:garagem/screens/service_details_screen.dart';
 
 class VehicleDetailScreen extends StatefulWidget {
   final Vehicle vehicle;
@@ -419,116 +420,117 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
           borderRadius: BorderRadius.circular(12),
           side: BorderSide(color: AppTheme.primaryColorLight.withOpacity(0.3), width: 1),
         ),
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Text(
-                      service.serviceType,
-                      style: AppTheme.titleSmall,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  Text(
-                    formattedDate,
-                    style: AppTheme.bodySmall,
-                  ),
-                ],
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => ServiceDetailsScreen(service: service),
               ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Icon(
-                    Icons.store,
-                    size: 14,
-                    color: AppTheme.textColorLight,
-                  ),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      service.workshop,
-                      style: AppTheme.bodyMedium.copyWith(color: AppTheme.textColorLight),
-                      overflow: TextOverflow.ellipsis,
+            );
+          },
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        service.serviceType,
+                        style: AppTheme.titleSmall,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                  ),
-                ],
-              ),
-              if (service.mechanic != null && service.mechanic!.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.person,
-                        size: 14,
-                        color: AppTheme.textColorLight,
-                      ),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Text(
-                          service.mechanic!,
-                          style: AppTheme.bodySmall,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
+                    Text(
+                      formattedDate,
+                      style: AppTheme.bodySmall,
+                    ),
+                  ],
                 ),
-              const SizedBox(height: 8),
-              if (totalCost > 0)
+                const SizedBox(height: 8),
                 Row(
                   children: [
                     Icon(
-                      Icons.attach_money,
-                      size: 16,
-                      color: AppTheme.primaryColor,
+                      Icons.store,
+                      size: 14,
+                      color: AppTheme.textColorLight,
                     ),
                     const SizedBox(width: 4),
-                    Text(
-                      'R\$ ${totalCost.toStringAsFixed(2)}',
-                      style: AppTheme.bodyMedium.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: AppTheme.primaryColor,
+                    Expanded(
+                      child: Text(
+                        service.workshop,
+                        style: AppTheme.bodyMedium.copyWith(color: AppTheme.textColorLight),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ],
                 ),
-              if (service.imagePaths.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Row(
+                if (service.mechanic != null && service.mechanic!.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.person,
+                          size: 14,
+                          color: AppTheme.textColorLight,
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            service.mechanic!,
+                            style: AppTheme.bodySmall,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                const SizedBox(height: 8),
+                if (totalCost > 0)
+                  Row(
                     children: [
                       Icon(
-                        Icons.image,
-                        size: 14,
-                        color: AppTheme.textColorLight,
+                        Icons.attach_money,
+                        size: 16,
+                        color: AppTheme.primaryColor,
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        '${service.imagePaths.length} imagem(ns)',
-                        style: AppTheme.bodySmall,
+                        'R\$ ${totalCost.toStringAsFixed(2)}',
+                        style: AppTheme.bodyMedium.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.primaryColor,
+                        ),
                       ),
                     ],
                   ),
-                ),
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerRight,
-                child: Text(
-                  'Deslize para excluir →',
-                  style: AppTheme.bodySmall.copyWith(
-                    fontSize: 10,
-                    color: AppTheme.textColorLight.withOpacity(0.6),
-                    fontStyle: FontStyle.italic,
+                if (service.imagePaths.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.image,
+                          size: 14,
+                          color: AppTheme.textColorLight,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${service.imagePaths.length} imagem(ns)',
+                          style: AppTheme.bodySmall,
+                        ),
+                        const Spacer(),
+                        Icon(Icons.chevron_right, color: AppTheme.textColorLight, size: 18),
+                      ],
+                    ),
                   ),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

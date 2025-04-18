@@ -1,0 +1,56 @@
+**1. Instale o Google Cloud SDK (se ainda não tiver):**
+
+*   Siga as instruções em: [https://cloud.google.com/sdk/docs/install](https://cloud.google.com/sdk/docs/install)
+*   Após a instalação, execute `gcloud init` para autenticar e configurar o SDK com seu projeto do Google Cloud/Firebase.
+
+**2. Crie um arquivo de configuração CORS:**
+
+*   Crie um arquivo de texto chamado `cors.json` (ou qualquer outro nome .json) no seu computador (por exemplo, na pasta do seu projeto backend) com o seguinte conteúdo:
+
+ [
+  {
+    "origin": ["http://localhost", "http://127.0.0.1"],
+    "method": ["GET"],
+    "maxAgeSeconds": 3600,
+    "responseHeader": ["Content-Type", "Access-Control-Allow-Origin"]
+  }
+]
+
+    *   **`origin`**: Lista das origens permitidas. Incluímos `http://localhost:53565` (a porta específica que seu app Flutter está usando) e `http://localhost` (para cobrir outras portas que você possa usar durante o desenvolvimento). **Importante:** Para produção, você deve substituir isso pela URL real do seu aplicativo web hospedado (ex: `https://seu-app.web.app`). Você pode usar `"*"` para permitir qualquer origem, mas isso é menos seguro e não recomendado para produção.
+    *   **`method`**: Métodos HTTP permitidos. `GET` é necessário para buscar as imagens.
+    *   **`maxAgeSeconds`**: Por quanto tempo o navegador pode armazenar em cache a resposta da verificação CORS (preflight). 3600 segundos = 1 hora.
+
+**3. Aplique a configuração CORS ao seu bucket:**
+
+*   Abra seu terminal ou prompt de comando.
+*   Navegue até a pasta onde você salvou o arquivo `cors.json`.
+*   Execute o seguinte comando `gsutil`, substituindo `garagem60storage.firebasestorage.app` pelo nome exato do seu bucket:
+
+    ```bash
+    gsutil cors set cors.json gs://garagem60storage.firebasestorage.app
+    ```
+
+**4. Aguarde a Propagação:**
+
+*   As alterações de CORS podem levar alguns minutos para serem aplicadas globalmente.
+
+**5. Teste Novamente:**
+
+*   Após alguns minutos, reinicie seu aplicativo Flutter web (ou apenas atualize a página `ServiceDetailsScreen`) e verifique se as imagens agora são carregadas sem o erro de CORS no console do navegador.
+
+**Observação:** Nenhuma alteração no código Dart ou Python é necessária para corrigir este problem específico. A configuração é feita diretamente no serviço do Google Cloud Storage.
+
+Para permitir qualquer origem, o arquivo cors.json poderá ser alterado para:
+
+[
+  {
+    "origin": ["*"],
+    "method": ["GET"],
+    "maxAgeSeconds": 3600,
+    "responseHeader": ["Content-Type", "Access-Control-Allow-Origin"]
+  }
+]
+
+Na pasta backend, execute (do prompt de comando)
+
+gsutil cors set cors.json gs://garagem60storage.firebasestorage.app
