@@ -1,12 +1,13 @@
 from flask import Blueprint, request, jsonify, current_app
 from extensions import db
-from models import Maintenance, MaintenanceImage, Vehicle, User
+from models import Maintenance, MaintenanceImage, Vehicle, User, TIER_LIMITS
 from datetime import datetime
 from .auth_routes import firebase_token_required
 from firebase_admin import storage # Importar storage
 import urllib.parse # Para decodificar URL
 import logging # Para logs
 import traceback # Para logar stack trace completo
+from .utils import check_limits # Importar check_limits
 
 maintenance_bp = Blueprint('maintenance', __name__)
 logger = logging.getLogger(__name__) # Configurar logger
@@ -117,6 +118,12 @@ def add_maintenance(firebase_uid):
     if not user:
         return jsonify({'message': 'Usuário local não encontrado'}), 404
 
+    # --- Verificação de Limite de Serviços ---
+    if not check_limits(user, 'add_service'):
+        logger.warning(f"Usuário {user.id} (Tier: {user.tier}) atingiu o limite de serviços.")
+        return jsonify({'message': f'Limite de serviços atingido para o plano {user.tier}.'}), 403
+    # --------------------------------------
+
     data = request.get_json()
     if not data or not data.get('vehicle_id') or not data.get('service_type') or not data.get('workshop'):
         return jsonify({'message': 'Campos obrigatórios não fornecidos'}), 400
@@ -124,6 +131,15 @@ def add_maintenance(firebase_uid):
     vehicle = Vehicle.query.filter_by(id=data['vehicle_id'], user_id=user.id).first()
     if not vehicle:
         return jsonify({'message': 'Veículo não encontrado ou não pertence a este usuário'}), 404
+
+    # --- Verificação de Limite de Fotos ---
+    image_urls = data.get('images', [])
+    num_new_images = len(image_urls)
+    if num_new_images > 0:
+        if not check_limits(user, 'add_photo', count=num_new_images):
+            logger.warning(f"Usuário {user.id} (Tier: {user.tier}) atingiu o limite de fotos ao tentar adicionar {num_new_images}.")
+            return jsonify({'message': f'Limite de fotos ({TIER_LIMITS.get(user.tier, {}).get("photos")}) atingido ou excedido para o plano {user.tier}.'}), 403
+    # -----------------------------------
 
     try:
         service_date = datetime.strptime(data.get('service_date', ''), '%Y-%m-%d %H:%M:%S') if data.get('service_date') else datetime.utcnow()
@@ -145,13 +161,19 @@ def add_maintenance(firebase_uid):
         db.session.add(new_maintenance)
         db.session.flush()
 
-        if data.get('images'):
-            for image_url in data['images']:
+        if num_new_images > 0:
+            for image_url in image_urls:
                 new_image = MaintenanceImage(
                     maintenance_id=new_maintenance.id,
                     image_url=image_url
                 )
                 db.session.add(new_image)
+
+        # --- Atualizar contagem de fotos do usuário ---
+        if num_new_images > 0:
+            user.photo_count += num_new_images
+            logger.info(f"Contagem de fotos do usuário {user.id} atualizada para {user.photo_count} após adicionar manutenção {new_maintenance.id}.")
+        # ---------------------------------------------
 
         db.session.commit()
 
@@ -175,6 +197,7 @@ def add_maintenance(firebase_uid):
 
     except Exception as e:
         db.session.rollback()
+        logger.error(f"Erro ao adicionar manutenção para usuário {user.id}: {e}")
         return jsonify({'message': f'Erro ao adicionar manutenção: {str(e)}'}), 500
 
 @maintenance_bp.route('/<int:maintenance_id>', methods=['DELETE'])
@@ -193,9 +216,10 @@ def delete_maintenance(firebase_uid, maintenance_id):
         # Alterado para 403 Forbidden, pois a manutenção existe mas não pertence ao usuário
         return jsonify({'message': 'Manutenção não pertence a um veículo deste usuário'}), 403
 
-    # --- Início: Lógica de exclusão de imagens ---
+    # --- Coletar URLs e CONTAR imagens ANTES de deletar ---
     image_urls_to_delete = [img.image_url for img in maintenance.images]
-    logger.info(f"Iniciando exclusão de {len(image_urls_to_delete)} imagens do Storage para manutenção ID {maintenance_id}")
+    num_photos_deleted = len(image_urls_to_delete) # Contar imagens
+    logger.info(f"Iniciando exclusão de {num_photos_deleted} imagens do Storage para manutenção ID {maintenance_id}")
     storage_deletion_failed = False
     for url in image_urls_to_delete:
         logger.debug(f"Processando URL para exclusão: {url}")
@@ -211,6 +235,13 @@ def delete_maintenance(firebase_uid, maintenance_id):
     try:
         # Excluir a manutenção (cascade removerá MaintenanceImage do DB)
         db.session.delete(maintenance)
+
+        # --- Atualizar contagem de fotos do usuário ---
+        if num_photos_deleted > 0:
+            user.photo_count = max(0, user.photo_count - num_photos_deleted) # Garante que não seja negativo
+            logger.info(f"Contagem de fotos do usuário {user.id} atualizada para {user.photo_count} após excluir manutenção {maintenance_id}.")
+        # ---------------------------------------------
+
         db.session.commit()
         logger.info(f"Manutenção ID {maintenance_id} excluída do DB com sucesso.")
         return jsonify({'message': 'Manutenção excluída com sucesso'}), 200
@@ -293,16 +324,19 @@ def update_maintenance(firebase_uid, maintenance_id):
             maintenance.service_date = datetime.strptime(data['service_date'], '%Y-%m-%d %H:%M:%S')
 
         if 'images' in data:
-            MaintenanceImage.query.filter_by(maintenance_id=maintenance.id).delete()
-            for image_url in data['images']:
-                new_image = MaintenanceImage(
-                    maintenance_id=maintenance.id,
-                    image_url=image_url
-                )
-                db.session.add(new_image)
+             logger.warning("Atualização de imagens em 'update_maintenance' ainda não gerencia contagem ou exclusão do Storage.")
+             MaintenanceImage.query.filter_by(maintenance_id=maintenance.id).delete()
+             for image_url in data['images']:
+                 new_image = MaintenanceImage(
+                     maintenance_id=maintenance.id,
+                     image_url=image_url
+                 )
+                 db.session.add(new_image)
 
         db.session.commit()
         return jsonify({'message': 'Manutenção atualizada com sucesso'}), 200
     except Exception as e:
         db.session.rollback()
+        logger.error(f"Erro ao atualizar manutenção ID {maintenance_id}: {e}")
+        logger.error(traceback.format_exc())
         return jsonify({'message': f'Erro ao atualizar manutenção: {str(e)}'}), 500

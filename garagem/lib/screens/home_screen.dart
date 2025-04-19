@@ -5,6 +5,7 @@ import 'package:garagem/theme/theme_screen.dart';
 import 'package:garagem/screens/add_vehicle_screen.dart';
 import 'package:garagem/screens/login_screen.dart';
 import 'package:garagem/screens/vehicle_detail_screen.dart';
+import 'package:intl/intl.dart'; // Importar intl
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -19,12 +20,18 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _errorMessage;
   List<Vehicle> _vehicles = [];
   String _userName = '';
+  String _userTier = 'Free'; // Default
+  String? _userSubscriptionEndDate; // Nullable
 
   @override
   void initState() {
     super.initState();
-    _loadUserInfo();
-    _fetchVehicles();
+    _loadUserInfoAndVehicles(); // Combina as chamadas iniciais
+  }
+
+  Future<void> _loadUserInfoAndVehicles() async {
+     await _loadUserInfo(); // Carrega info do usuário primeiro
+     await _fetchVehicles(); // Depois carrega veículos
   }
 
   Future<void> _loadUserInfo() async {
@@ -32,6 +39,8 @@ class _HomeScreenState extends State<HomeScreen> {
     if (userInfo.isNotEmpty && mounted) {
       setState(() {
         _userName = userInfo['name'] ?? '';
+        _userTier = userInfo['tier'] ?? 'Free'; // Pega o tier
+        _userSubscriptionEndDate = userInfo['subscription_end_date']; // Pega a data
       });
     }
   }
@@ -137,6 +146,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // --- Lógica simples para verificar limite de veículos (Free) ---
+    // Idealmente, isso viria de constantes compartilhadas ou do backend
+    bool canAddVehicle = true;
+    if (_userTier == 'Free' && _vehicles.length >= 1) {
+      canAddVehicle = false;
+    }
+    // -----------------------------------------------------------
+
     return Scaffold(
       backgroundColor: AppTheme.backgroundColor,
       appBar: AppBar(
@@ -155,18 +172,19 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: _buildBody(),
       floatingActionButton: FloatingActionButton(
-        backgroundColor: AppTheme.primaryColor,
-        child: const Icon(Icons.add),
-        onPressed: () async {
+        backgroundColor: canAddVehicle ? AppTheme.primaryColor : Colors.grey, // Cor baseada no limite
+        tooltip: canAddVehicle ? 'Adicionar Veículo' : 'Limite de veículos atingido (Plano Free)',
+        onPressed: canAddVehicle ? () async { // Habilita/desabilita onPressed
           final result = await Navigator.push(
             context,
             MaterialPageRoute(builder: (context) => const AddVehicleScreen()),
           );
-          
           if (result == true) {
-            _fetchVehicles();
+            _fetchVehicles(); // Recarrega veículos após adicionar
+            _loadUserInfo(); // Recarrega info do usuário (caso algo mude)
           }
-        },
+        } : null, // Define como null se não puder adicionar
+        child: const Icon(Icons.add),
       ),
     );
   }
@@ -250,8 +268,20 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildHeader() {
+    String statusText = 'Plano: $_userTier';
+    if (_userTier != 'Free' && _userSubscriptionEndDate != null) {
+      try {
+        final endDate = DateTime.parse(_userSubscriptionEndDate!);
+        final formattedDate = DateFormat('dd/MM/yyyy').format(endDate);
+        statusText += ' (Válido até $formattedDate)';
+      } catch (e) {
+        print("Erro ao formatar data de expiração: $e");
+        // Mantém apenas o nome do tier se a data for inválida
+      }
+    }
+
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.only(bottom: 24), // Aumentar espaçamento
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -259,10 +289,26 @@ class _HomeScreenState extends State<HomeScreen> {
             'Olá, $_userName',
             style: AppTheme.titleMedium,
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 8),
+          // Exibir status do plano
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: _userTier == 'Free' ? Colors.orange.shade100 : Colors.green.shade100,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              statusText,
+              style: AppTheme.bodySmall.copyWith(
+                fontWeight: FontWeight.bold,
+                color: _userTier == 'Free' ? Colors.orange.shade800 : Colors.green.shade800,
+              ),
+            ),
+          ),
+          const SizedBox(height: 16), // Espaço antes da lista
           Text(
-            'Aqui estão seus veículos cadastrados:',
-            style: AppTheme.bodySmall,
+            'Seus veículos cadastrados:',
+            style: AppTheme.bodyMedium.copyWith(color: AppTheme.textColorLight),
           ),
         ],
       ),

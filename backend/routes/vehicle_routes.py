@@ -6,6 +6,7 @@ import logging
 from .auth_routes import firebase_token_required
 # Importar funções auxiliares de maintenance_routes (ou duplicá-las se preferir isolamento)
 from .maintenance_routes import delete_image_from_storage
+from .utils import check_limits # Importar check_limits
 import traceback # Para logar stack trace completo
 
 # Configurar logging
@@ -68,6 +69,12 @@ def add_vehicle(firebase_uid):
     if not user:
         return jsonify({'message': 'Usuário local não encontrado'}), 404
 
+    # --- Verificação de Limite ---
+    if not check_limits(user, 'add_vehicle'):
+        logger.warning(f"Usuário {user.id} (Tier: {user.tier}) atingiu o limite de veículos.")
+        return jsonify({'message': f'Limite de veículos atingido para o plano {user.tier}.'}), 403
+    # ---------------------------
+
     data = request.get_json()
     
     # Verifica se os campos obrigatórios estão presentes
@@ -92,21 +99,26 @@ def add_vehicle(firebase_uid):
         color=data.get('color')
     )
     
-    db.session.add(new_vehicle)
-    db.session.commit()
-    
-    return jsonify({
-        'message': 'Veículo adicionado com sucesso',
-        'vehicle': {
-            'id': new_vehicle.id,
-            'type': new_vehicle.type,
-            'brand': new_vehicle.brand,
-            'model': new_vehicle.model,
-            'year': new_vehicle.year,
-            'license_plate': new_vehicle.license_plate,
-            'color': new_vehicle.color
-        }
-    }), 201
+    try: # Adicionar try/except para commit
+        db.session.add(new_vehicle)
+        db.session.commit()
+        logger.info(f"Veículo adicionado com sucesso para o usuário {user.id}.")
+        return jsonify({
+            'message': 'Veículo adicionado com sucesso',
+            'vehicle': {
+                'id': new_vehicle.id,
+                'type': new_vehicle.type,
+                'brand': new_vehicle.brand,
+                'model': new_vehicle.model,
+                'year': new_vehicle.year,
+                'license_plate': new_vehicle.license_plate,
+                'color': new_vehicle.color
+            }
+        }), 201
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Erro ao salvar novo veículo para usuário {user.id}: {e}")
+        return jsonify({'message': f'Erro interno ao salvar veículo: {str(e)}'}), 500
 
 @vehicle_bp.route('/<int:vehicle_id>', methods=['DELETE'])
 @firebase_token_required
@@ -125,11 +137,13 @@ def delete_vehicle(firebase_uid, vehicle_id):
 
         # --- Início: Coletar URLs das imagens ANTES de deletar ---
         all_image_urls_to_delete = []
+        num_photos_deleted = 0 # Contador
         logger.info(f"Coletando URLs de imagens para exclusão do veículo ID {vehicle_id}...")
         for maintenance in vehicle.maintenances:
             logger.debug(f"  - Verificando manutenção ID {maintenance.id}")
             for image in maintenance.images:
                 all_image_urls_to_delete.append(image.image_url)
+                num_photos_deleted += 1 # Incrementar contador
                 logger.debug(f"    - Coletada URL: {image.image_url}")
         logger.info(f"Total de {len(all_image_urls_to_delete)} URLs coletadas para o veículo ID {vehicle_id}.")
         # --- Fim: Coletar URLs ---
@@ -137,7 +151,14 @@ def delete_vehicle(firebase_uid, vehicle_id):
         # Excluir o veículo do banco de dados
         # O cascade='all, delete-orphan' removerá as manutenções e MaintenanceImages associadas
         db.session.delete(vehicle)
-        db.session.commit()
+
+        # --- Atualizar contagem de fotos do usuário ---
+        if num_photos_deleted > 0:
+            user.photo_count = max(0, user.photo_count - num_photos_deleted) # Garante que não seja negativo
+            logger.info(f"Contagem de fotos do usuário {user.id} atualizada para {user.photo_count} após excluir veículo {vehicle_id}.")
+        # ---------------------------------------------
+
+        db.session.commit() # Commit após deletar veículo e atualizar contagem
         logger.info(f"Veículo ID {vehicle_id} e dados associados excluídos do DB com sucesso.")
 
         # --- Início: Deletar imagens do Storage APÓS commit do DB ---

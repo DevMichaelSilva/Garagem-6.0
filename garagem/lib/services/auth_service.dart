@@ -1,19 +1,15 @@
 import 'dart:convert';
-// Remover 'hide User' para permitir o uso do tipo User do Firebase Auth
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http; // Adicionar import http
+import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart'; // Para formatar data
 
 class AuthService {
   final FirebaseAuth _firebaseAuth = FirebaseAuth.instance;
 
-  // Chaves para armazenamento local (podem ser removidas se não usar mais SharedPreferences aqui)
-  // static const String _tokenKey = 'auth_token'; // Firebase Auth gerencia o token
-  static const String _userProfileKey = 'user_profile_data'; // Para dados adicionais (nome, etc.)
-  // Adicionar URL base do backend
+  static const String _userProfileKey = 'user_profile_data'; // Manter para dados locais
   static const String baseUrl = 'http://127.0.0.1:5000/api'; // Ajuste se necessário
 
-  // Método para fazer login com Firebase Auth
   Future<Map<String, dynamic>> login(String email, String password) async {
     try {
       UserCredential userCredential = await _firebaseAuth.signInWithEmailAndPassword(
@@ -21,7 +17,6 @@ class AuthService {
         password: password,
       );
 
-      // Após login bem-sucedido, sincronizar com o backend
       await _syncUserWithBackend(); // Chama a sincronização
 
       return {
@@ -49,9 +44,6 @@ class AuthService {
     }
   }
 
-  // Método para registrar um novo usuário com Firebase Auth
-  // Nota: CPF e Telefone não são tratados pelo Firebase Auth padrão.
-  // Você precisará salvar esses dados separadamente (ex: Firestore ou seu backend) após o registro.
   Future<Map<String, dynamic>> register(String name, String email, String password, String cpf, String phone) async {
     try {
       UserCredential userCredential = await _firebaseAuth.createUserWithEmailAndPassword(
@@ -59,11 +51,9 @@ class AuthService {
         password: password,
       );
 
-      // Atualizar o nome de exibição do usuário no Firebase Auth
       await userCredential.user?.updateDisplayName(name);
       await userCredential.user?.reload(); // Recarregar para obter o nome atualizado
 
-      // Após registro bem-sucedido, sincronizar com o backend, enviando CPF e Telefone
       await _syncUserWithBackend(cpf: cpf, phone: phone); // Chama a sincronização com dados extras
 
       return {
@@ -93,19 +83,14 @@ class AuthService {
     }
   }
 
-  // Método para verificar se o usuário está logado (usando Firebase Auth)
   Future<bool> isLoggedIn() async {
-    // Verifica se há um usuário atualmente logado no Firebase Auth
     return _firebaseAuth.currentUser != null;
   }
 
-  // Método para obter o ID Token do Firebase (usado para autenticar no seu backend)
   Future<String?> getToken() async {
     try {
-      // Agora 'User' é reconhecido
       User? currentUser = _firebaseAuth.currentUser;
       if (currentUser != null) {
-        // Retorna o ID Token JWT do Firebase
         return await currentUser.getIdToken(true); // true força a atualização se expirado
       }
       return null;
@@ -115,23 +100,28 @@ class AuthService {
     }
   }
 
-  // Método para obter informações do usuário atual do Firebase Auth
   Future<Map<String, dynamic>> getCurrentUser() async {
     try {
-      // Agora 'User' é reconhecido
       User? currentUser = _firebaseAuth.currentUser;
       if (currentUser != null) {
-        // Retorna dados básicos do usuário Firebase
+        final prefs = await SharedPreferences.getInstance();
+        final userString = prefs.getString(_userProfileKey);
+        Map<String, dynamic> localData = {};
+        if (userString != null) {
+          localData = jsonDecode(userString);
+          if (localData['id'] != currentUser.uid) {
+            localData = {}; // Limpa se for de outro usuário
+          }
+        }
+
         return {
-          'id': currentUser.uid, // ID único do Firebase
-          'name': currentUser.displayName ?? '',
-          'email': currentUser.email ?? '',
-          // Você pode buscar dados adicionais (CPF, Telefone) de onde os salvou
-          // 'cpf': await _getAdditionalUserData(currentUser.uid, 'cpf'),
-          // 'phone': await _getAdditionalUserData(currentUser.uid, 'phone'),
+          'id': currentUser.uid,
+          'name': currentUser.displayName ?? localData['name'] ?? '', // Fallback
+          'email': currentUser.email ?? localData['email'] ?? '', // Fallback
+          'tier': localData['tier'] ?? 'Free', // Pega do local ou default
+          'subscription_end_date': localData['subscription_end_date'], // Pega do local
         };
       }
-      // Tenta carregar do SharedPreferences como fallback (se você salvou algo lá)
       final prefs = await SharedPreferences.getInstance();
       final userString = prefs.getString(_userProfileKey);
       if (userString != null) {
@@ -145,11 +135,9 @@ class AuthService {
     }
   }
 
-  // Método para fazer logout do Firebase Auth
   Future<void> logout() async {
     try {
       await _firebaseAuth.signOut();
-      // Limpar dados adicionais salvos localmente, se houver
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_userProfileKey);
     } catch (e) {
@@ -157,23 +145,20 @@ class AuthService {
     }
   }
 
-  // Método privado para sincronizar com o backend
   Future<void> _syncUserWithBackend({String? cpf, String? phone}) async {
     try {
-      String? token = await getToken(); // Obter o token Firebase
+      String? token = await getToken();
       if (token == null) {
         print("Sync Error: Token não disponível.");
-        return; // Não pode sincronizar sem token
+        return;
       }
 
-      // Agora 'User' é reconhecido
       User? currentUser = _firebaseAuth.currentUser;
       if (currentUser == null) {
         print("Sync Error: Usuário Firebase não encontrado.");
         return;
       }
 
-      // Prepara dados adicionais (se houver)
       Map<String, dynamic> body = {};
       if (cpf != null) body['cpf'] = cpf;
       if (phone != null) body['phone'] = phone;
@@ -184,31 +169,34 @@ class AuthService {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token', // Envia o token Firebase
         },
-        body: jsonEncode(body), // Envia CPF/Telefone se disponíveis
+        body: jsonEncode(body),
       );
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         print("Usuário sincronizado com backend com sucesso.");
-        // Opcional: Salvar/atualizar dados locais se o backend retornar algo útil
-        // final responseData = jsonDecode(response.body);
-        // await _saveUserProfileDataLocally(responseData['user_id'], currentUser.displayName, currentUser.email, cpf, phone);
+        final responseData = jsonDecode(response.body);
+
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_userProfileKey, jsonEncode({
+          'id': currentUser.uid, // Usar UID do Firebase como ID local
+          'name': currentUser.displayName ?? '',
+          'email': currentUser.email ?? '',
+          'tier': responseData['tier'], // Salvar tier do backend
+          'subscription_end_date': responseData['subscription_end_date'], // Salvar data do backend
+          'cpf': cpf ?? (await _getAdditionalUserData(currentUser.uid, 'cpf')),
+          'phone': phone ?? (await _getAdditionalUserData(currentUser.uid, 'phone')),
+        }));
+
       } else {
         print("Erro ao sincronizar usuário com backend: ${response.statusCode} - ${response.body}");
-        // Tratar erro de sincronização se necessário
       }
     } catch (e) {
       print("Exceção ao sincronizar usuário com backend: $e");
-      // Tratar exceção de rede/etc.
     }
   }
 
-  // --- Métodos auxiliares (Exemplos - precisam ser implementados) ---
-
-  // Exemplo: Salvar dados adicionais (CPF, Telefone) após registro
-  // Substitua isso pela sua lógica real (Firestore, API Backend, etc.)
   Future<void> _saveAdditionalUserData(String uid, String name, String cpf, String phone) async {
      print("Simulando salvamento de dados adicionais para UID: $uid");
-     // Exemplo com SharedPreferences (NÃO RECOMENDADO PARA PRODUÇÃO - use Firestore ou seu backend)
      final prefs = await SharedPreferences.getInstance();
      await prefs.setString(_userProfileKey, jsonEncode({
        'uid': uid,
@@ -216,18 +204,10 @@ class AuthService {
        'cpf': cpf,
        'phone': phone,
      }));
-     // Exemplo: Chamada para sua API Flask para salvar/atualizar usuário
-     // await http.post(Uri.parse('YOUR_BACKEND_URL/api/users/update_profile'),
-     //   headers: {'Content-Type': 'application/json'},
-     //   body: jsonEncode({'firebase_uid': uid, 'name': name, 'cpf': cpf, 'phone': phone}),
-     // );
   }
 
-  // Exemplo: Buscar dados adicionais
-  // Substitua pela sua lógica real
   Future<String?> _getAdditionalUserData(String uid, String field) async {
      print("Simulando busca de dados adicionais ($field) para UID: $uid");
-     // Exemplo com SharedPreferences
      final prefs = await SharedPreferences.getInstance();
      final userString = prefs.getString(_userProfileKey);
      if (userString != null) {
@@ -238,8 +218,4 @@ class AuthService {
      }
      return null;
   }
-
-  // Método verifyToken não é mais necessário no frontend,
-  // pois getIdToken() já lida com a validade/atualização.
-  // O backend verificará o token recebido.
 }

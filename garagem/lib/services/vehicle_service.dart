@@ -184,6 +184,11 @@ class VehicleService {
           'message': 'Veículo adicionado com sucesso!',
           'vehicle': Vehicle.fromJson(data['vehicle']),
         };
+      } else if (response.statusCode == 403) { // --- Tratar erro de limite ---
+         return {
+           'success': false,
+           'message': data['message'] ?? 'Limite atingido para seu plano atual.', // Usa msg do backend
+         };
       } else {
         return {
           'success': false,

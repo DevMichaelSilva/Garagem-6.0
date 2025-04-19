@@ -4,6 +4,7 @@ from extensions import db
 # Remover imports não utilizados: jwt, datetime, generate_password_hash, check_password_hash, re
 from firebase_admin import auth # Importar auth do firebase_admin
 from functools import wraps # Importar wraps
+from datetime import datetime # Adicionar datetime
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -85,7 +86,14 @@ def sync_user(firebase_uid):
             db.session.add(user)
             db.session.commit()
             print(f"Novo usuário criado no DB local: UID={firebase_uid}, Email={email}")
-            return jsonify({"message": "Usuário sincronizado com sucesso (novo)", "user_id": user.id}), 201
+            # --- Retornar dados do usuário ---
+            return jsonify({
+                "message": "Usuário sincronizado com sucesso (novo)",
+                "user_id": user.id,
+                "tier": user.tier,
+                "subscription_end_date": user.subscription_end_date.isoformat() if user.subscription_end_date else None
+            }), 201
+            # ---------------------------------
         else:
             # Se já existe, pode opcionalmente atualizar informações (nome, etc.)
             updated = False
@@ -107,7 +115,14 @@ def sync_user(firebase_uid):
                 db.session.commit()
                 print(f"Usuário atualizado no DB local: UID={firebase_uid}")
 
-            return jsonify({"message": "Usuário sincronizado com sucesso (existente)", "user_id": user.id}), 200
+            # --- Retornar dados do usuário ---
+            return jsonify({
+                "message": "Usuário sincronizado com sucesso (existente)",
+                "user_id": user.id,
+                "tier": user.tier,
+                "subscription_end_date": user.subscription_end_date.isoformat() if user.subscription_end_date else None
+            }), 200
+            # ---------------------------------
 
     except auth.UserNotFoundError:
         return jsonify({"message": "Usuário Firebase não encontrado"}), 404
